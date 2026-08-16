@@ -1,0 +1,19 @@
+# Godot writes LF and reads LF on every platform. Windows checkouts default to
+# converting text files to CRLF (core.autocrlf=true), which rewrites every
+# script and scene the moment the repo is cloned and turns the first diff on a
+# new machine into the whole project.
+* text=auto eol=lf
+
+# Everything Godot stores as bytes. Marked so git never tries to normalise line
+# endings inside them or offer a line diff of a spritesheet.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.svg binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+*.pck binary

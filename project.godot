@@ -1,0 +1,50 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
+
+[application]
+
+config/name="Merge Fortress"
+run/main_scene="res://scenes/menu/Menu.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+UnitDatabase="*res://scripts/autoload/UnitDatabase.gd"
+GameManager="*res://scripts/autoload/GameManager.gd"
+MergeManager="*res://scripts/autoload/MergeManager.gd"
+CombatManager="*res://scripts/autoload/CombatManager.gd"
+UpgradeManager="*res://scripts/autoload/UpgradeManager.gd"
+SpawnManager="*res://scripts/autoload/SpawnManager.gd"
+WaveManager="*res://scripts/autoload/WaveManager.gd"
+MusicPlayer="*res://scripts/autoload/MusicPlayer.gd"
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=1920
+window/size/window_width_override=486
+window/size/window_height_override=864
+window/stretch/mode="canvas_items"
+window/handheld/orientation="portrait"
+
+[physics]
+
+2d/default_gravity=980
+
+[rendering]
+
+textures/canvas_textures/default_texture_filter=0
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.06, 0.06, 0.1, 1)

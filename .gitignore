@@ -1,0 +1,31 @@
+# Godot's import cache and editor state. Regenerated from the project on first
+# open, several times the size of the project itself, and different on every
+# machine -- committing it is how a repo ends up with merge conflicts in files
+# nobody wrote.
+.godot/
+.import/
+
+# Export output.
+/build/
+/export/
+*.pck
+*.zip
+*.exe
+*.apk
+*.aab
+
+# Generated from CSV translation sources.
+*.translation
+
+# Mono / C# leftovers, in case the project ever gains a script assembly.
+.mono/
+data_*/
+mono_crash.*.json
+
+# Per-machine tool settings rather than project settings.
+.claude/settings.local.json
+
+# OS clutter.
+.DS_Store
+Thumbs.db
+desktop.ini

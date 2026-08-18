@@ -5,6 +5,8 @@ const SlashArc = preload("res://scripts/fx/SlashArc.gd")
 const SpearShot = preload("res://scripts/fx/SpearShot.gd")
 const FxUtil = preload("res://scripts/fx/FxUtil.gd")
 const Shockwave = preload("res://scripts/fx/Shockwave.gd")
+const SkullMark = preload("res://scripts/fx/SkullMark.gd")
+const DarkRise = preload("res://scripts/fx/DarkRise.gd")
 
 # ------------------------------------------------------------ attack frames
 #
@@ -268,6 +270,251 @@ const ANIM := {
 			{"tex": "res://art/archmage.png", "foot": Vector2(110, 325), "hold": 0.12, "fx": "", "lean": 3.0},
 		],
 	},
+
+	# ------------------------------------------------------------- the heroes
+	#
+	# The only bodies in the game with a drawn standing loop: "idle" is a row of
+	# poses cycled forever while the hero is doing nothing, in place of the
+	# procedural breath every other unit gets. Merged units are made and unmade
+	# by the dozen and a scale wobble is enough for them; a hero is one body the
+	# player picked before the run and it should be the one thing on the field
+	# that is visibly alive between blows.
+	#
+	# Both rows are cut out of the hero's own design sheet (art/<name>.png) and
+	# registered against the ground line of the row they came from, which is why
+	# a hero can hold twelve poses without drifting a pixel. The walk rows on
+	# those sheets are deliberately unused -- a hero holds a slot on the ring and
+	# never takes a step.
+	#
+	# The blow lands on the last drawn beat for the throwers (the pose the shot
+	# actually leaves the hand on) and a beat earlier for the zombie lord, whose
+	# lunge needs somewhere to land before he straightens up again.
+	"hero_void_master": {
+		"hit": 9, "tint": Color(0.78, 0.46, 1.0), "shot": "res://art/hero_void_master_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_void_master_idle_0.png", "foot": Vector2(47, 123), "hold": 0.16},
+			{"tex": "res://art/hero_void_master_idle_1.png", "foot": Vector2(47, 124), "hold": 0.16},
+			{"tex": "res://art/hero_void_master_idle_2.png", "foot": Vector2(49, 123), "hold": 0.16},
+			{"tex": "res://art/hero_void_master_idle_3.png", "foot": Vector2(46, 123), "hold": 0.16},
+			{"tex": "res://art/hero_void_master_idle_4.png", "foot": Vector2(48, 123), "hold": 0.16},
+			{"tex": "res://art/hero_void_master_idle_5.png", "foot": Vector2(46, 123), "hold": 0.16},
+		],
+		"frames": [
+			{"tex": "res://art/hero_void_master_idle_0.png", "foot": Vector2(47, 123), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_0.png", "foot": Vector2(40, 125), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_1.png", "foot": Vector2(39, 125), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_2.png", "foot": Vector2(39, 125), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_3.png", "foot": Vector2(37, 125), "hold": 0.05, "fx": "raise"},
+			{"tex": "res://art/hero_void_master_atk_4.png", "foot": Vector2(37, 125), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_5.png", "foot": Vector2(38, 125), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_6.png", "foot": Vector2(38, 125), "hold": 0.05, "fx": "charge"},
+			{"tex": "res://art/hero_void_master_atk_7.png", "foot": Vector2(39, 125), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_void_master_atk_8.png", "foot": Vector2(39, 125), "hold": 0.16, "fx": "release_big"},
+		],
+	},
+	"hero_aurelia": {
+		"hit": 8, "tint": Color(1.0, 0.86, 0.44), "shot": "res://art/hero_aurelia_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_aurelia_idle_0.png", "foot": Vector2(48, 117), "hold": 0.16},
+			{"tex": "res://art/hero_aurelia_idle_1.png", "foot": Vector2(49, 125), "hold": 0.16},
+			{"tex": "res://art/hero_aurelia_idle_2.png", "foot": Vector2(53, 118), "hold": 0.16},
+			{"tex": "res://art/hero_aurelia_idle_3.png", "foot": Vector2(49, 118), "hold": 0.16},
+			{"tex": "res://art/hero_aurelia_idle_4.png", "foot": Vector2(53, 122), "hold": 0.16},
+			{"tex": "res://art/hero_aurelia_idle_5.png", "foot": Vector2(50, 118), "hold": 0.16},
+		],
+		"frames": [
+			{"tex": "res://art/hero_aurelia_idle_0.png", "foot": Vector2(48, 117), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_0.png", "foot": Vector2(43, 120), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_1.png", "foot": Vector2(40, 119), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_2.png", "foot": Vector2(65, 119), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_3.png", "foot": Vector2(63, 144), "hold": 0.06, "fx": "raise"},
+			{"tex": "res://art/hero_aurelia_atk_4.png", "foot": Vector2(57, 144), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_5.png", "foot": Vector2(40, 121), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_aurelia_atk_6.png", "foot": Vector2(44, 120), "hold": 0.05, "fx": "charge"},
+			{"tex": "res://art/hero_aurelia_atk_7.png", "foot": Vector2(45, 120), "hold": 0.16, "fx": "release_big"},
+		],
+	},
+	"hero_lumen_strike": {
+		"hit": 7, "tint": Color(1.0, 0.82, 0.34), "shot": "res://art/hero_lumen_strike_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_lumen_strike_idle_0.png", "foot": Vector2(37, 124), "hold": 0.16},
+			{"tex": "res://art/hero_lumen_strike_idle_1.png", "foot": Vector2(36, 125), "hold": 0.16},
+			{"tex": "res://art/hero_lumen_strike_idle_2.png", "foot": Vector2(39, 125), "hold": 0.16},
+			{"tex": "res://art/hero_lumen_strike_idle_3.png", "foot": Vector2(45, 125), "hold": 0.16},
+			{"tex": "res://art/hero_lumen_strike_idle_4.png", "foot": Vector2(44, 125), "hold": 0.16},
+			{"tex": "res://art/hero_lumen_strike_idle_5.png", "foot": Vector2(40, 125), "hold": 0.16},
+		],
+		"frames": [
+			{"tex": "res://art/hero_lumen_strike_idle_0.png", "foot": Vector2(37, 124), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_0.png", "foot": Vector2(47, 128), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_1.png", "foot": Vector2(53, 128), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_2.png", "foot": Vector2(63, 128), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_3.png", "foot": Vector2(59, 128), "hold": 0.05, "fx": "charge"},
+			{"tex": "res://art/hero_lumen_strike_atk_4.png", "foot": Vector2(61, 128), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_5.png", "foot": Vector2(58, 127), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_lumen_strike_atk_6.png", "foot": Vector2(57, 130), "hold": 0.18, "fx": "release_big"},
+		],
+	},
+	"hero_windmaster": {
+		"hit": 7, "tint": Color(0.84, 1.0, 0.50), "shot": "res://art/hero_windmaster_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_windmaster_idle_0.png", "foot": Vector2(55, 123), "hold": 0.16},
+			{"tex": "res://art/hero_windmaster_idle_1.png", "foot": Vector2(49, 124), "hold": 0.16},
+			{"tex": "res://art/hero_windmaster_idle_2.png", "foot": Vector2(52, 128), "hold": 0.16},
+			{"tex": "res://art/hero_windmaster_idle_3.png", "foot": Vector2(50, 129), "hold": 0.16},
+			{"tex": "res://art/hero_windmaster_idle_4.png", "foot": Vector2(58, 129), "hold": 0.16},
+			{"tex": "res://art/hero_windmaster_idle_5.png", "foot": Vector2(78, 128), "hold": 0.16},
+		],
+		"frames": [
+			{"tex": "res://art/hero_windmaster_idle_0.png", "foot": Vector2(55, 123), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_0.png", "foot": Vector2(51, 118), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_1.png", "foot": Vector2(53, 117), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_2.png", "foot": Vector2(53, 112), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_3.png", "foot": Vector2(53, 111), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_4.png", "foot": Vector2(53, 111), "hold": 0.05, "fx": "charge"},
+			{"tex": "res://art/hero_windmaster_atk_5.png", "foot": Vector2(50, 111), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_windmaster_atk_6.png", "foot": Vector2(54, 113), "hold": 0.17, "fx": "release_big"},
+		],
+	},
+	"hero_zombie_lord": {
+		"hit": 6, "tint": Color(0.62, 0.95, 0.48), "shot": "",
+		"idle": [
+			{"tex": "res://art/hero_zombie_lord_idle_0.png", "foot": Vector2(43, 129), "hold": 0.18},
+			{"tex": "res://art/hero_zombie_lord_idle_1.png", "foot": Vector2(47, 125), "hold": 0.18},
+			{"tex": "res://art/hero_zombie_lord_idle_2.png", "foot": Vector2(46, 125), "hold": 0.18},
+			{"tex": "res://art/hero_zombie_lord_idle_3.png", "foot": Vector2(46, 125), "hold": 0.18},
+			{"tex": "res://art/hero_zombie_lord_idle_4.png", "foot": Vector2(47, 126), "hold": 0.18},
+			{"tex": "res://art/hero_zombie_lord_idle_5.png", "foot": Vector2(47, 124), "hold": 0.18},
+		],
+		"frames": [
+			{"tex": "res://art/hero_zombie_lord_idle_0.png", "foot": Vector2(43, 129), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_0.png", "foot": Vector2(47, 120), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_1.png", "foot": Vector2(52, 106), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_2.png", "foot": Vector2(65, 116), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_3.png", "foot": Vector2(61, 116), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_4.png", "foot": Vector2(57, 113), "hold": 0.06, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_atk_5.png", "foot": Vector2(57, 113), "hold": 0.10, "fx": "swing_big"},
+			{"tex": "res://art/hero_zombie_lord_atk_6.png", "foot": Vector2(41, 113), "hold": 0.14, "fx": "dust"},
+		],
+	},
+	# The zombie lord after his ability comes in -- the body on the front of
+	# art/zombie_lord_upgrade.png rather than the one on art/zombie_lord.png.
+	# Keyed under a name of its own rather than replacing the entry above,
+	# because both have to exist at once: he spends the first ten levels as one
+	# and the rest of the run as the other. See Defender._ascend.
+	#
+	# The sheet draws him one row of eight and calls it CASTING, so that row is
+	# every pose he has from here on -- his ordinary blow as well as the cast the
+	# button throws. That is not a compromise: a lord who has come into his power
+	# stops swinging at things and starts blasting them, and the same drawings
+	# say both, which is exactly why the row was drawn.
+	#
+	# Standing is the arms-wide pose with the rot burning at his chest, cycled
+	# against the brighter drawing of the same stance -- the two are the same
+	# pose at two strengths, so the loop reads as power breathing in him rather
+	# than as a man shifting his weight.
+	"hero_zombie_lord_up": {
+		"hit": 4, "tint": Color(0.70, 1.0, 0.48), "shot": "",
+		"idle": [
+			{"tex": "res://art/hero_zombie_lord_up_cast_3.png", "foot": Vector2(58, 179), "hold": 0.30},
+			{"tex": "res://art/hero_zombie_lord_up_cast_4.png", "foot": Vector2(57, 180), "hold": 0.30},
+		],
+		"frames": [
+			{"tex": "res://art/hero_zombie_lord_up_cast_3.png", "foot": Vector2(58, 179), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_up_cast_0.png", "foot": Vector2(62, 141), "hold": 0.07, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_up_cast_1.png", "foot": Vector2(56, 175), "hold": 0.07, "fx": ""},
+			{"tex": "res://art/hero_zombie_lord_up_cast_2.png", "foot": Vector2(52, 176), "hold": 0.08, "fx": "raise"},
+			{"tex": "res://art/hero_zombie_lord_up_cast_5.png", "foot": Vector2(59, 180), "hold": 0.15, "fx": "swing_big"},
+			{"tex": "res://art/hero_zombie_lord_up_cast_4.png", "foot": Vector2(57, 180), "hold": 0.12, "fx": "dust"},
+		],
+	},
+	"hero_venom_dartmaster": {
+		"hit": 7, "tint": Color(0.78, 1.0, 0.36), "shot": "res://art/hero_venom_dartmaster_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_venom_dartmaster_idle_0.png", "foot": Vector2(37, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_1.png", "foot": Vector2(33, 109), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_2.png", "foot": Vector2(33, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_3.png", "foot": Vector2(32, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_4.png", "foot": Vector2(34, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_5.png", "foot": Vector2(33, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_6.png", "foot": Vector2(33, 108), "hold": 0.15},
+			{"tex": "res://art/hero_venom_dartmaster_idle_7.png", "foot": Vector2(33, 108), "hold": 0.15},
+		],
+		"frames": [
+			{"tex": "res://art/hero_venom_dartmaster_idle_0.png", "foot": Vector2(37, 108), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_0.png", "foot": Vector2(34, 107), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_1.png", "foot": Vector2(40, 106), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_2.png", "foot": Vector2(46, 107), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_3.png", "foot": Vector2(45, 107), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_4.png", "foot": Vector2(44, 107), "hold": 0.05, "fx": "charge"},
+			{"tex": "res://art/hero_venom_dartmaster_atk_5.png", "foot": Vector2(45, 107), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_venom_dartmaster_atk_6.png", "foot": Vector2(49, 109), "hold": 0.14, "fx": "release"},
+		],
+	},
+	# The cronomancer's row is the longest drawn attack in the game and it is
+	# drawn as one continuous throw: he winds up, the hourglass in his off hand
+	# charges, the bolt leaves on the fourth beat, and the last three drawings
+	# are it streaking away from him. So the blow lands on the beat the bolt
+	# leaves the hand rather than on the last one -- everything after it is
+	# follow-through, and holding the damage back for it would put the hit a
+	# fifth of a second behind the picture of it.
+	"hero_cronomancer": {
+		"hit": 4, "tint": Color(0.66, 0.84, 1.0), "shot": "res://art/hero_cronomancer_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_cronomancer_idle_0.png", "foot": Vector2(54, 130), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_1.png", "foot": Vector2(55, 130), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_2.png", "foot": Vector2(53, 128), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_3.png", "foot": Vector2(56, 127), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_4.png", "foot": Vector2(49, 127), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_5.png", "foot": Vector2(55, 127), "hold": 0.16},
+			{"tex": "res://art/hero_cronomancer_idle_6.png", "foot": Vector2(56, 127), "hold": 0.16},
+		],
+		"frames": [
+			{"tex": "res://art/hero_cronomancer_idle_0.png", "foot": Vector2(54, 130), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_0.png", "foot": Vector2(52, 135), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_1.png", "foot": Vector2(46, 136), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_2.png", "foot": Vector2(56, 132), "hold": 0.07, "fx": "charge"},
+			{"tex": "res://art/hero_cronomancer_atk_3.png", "foot": Vector2(67, 135), "hold": 0.09, "fx": "release_big"},
+			{"tex": "res://art/hero_cronomancer_atk_4.png", "foot": Vector2(60, 133), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_5.png", "foot": Vector2(58, 130), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_6.png", "foot": Vector2(59, 141), "hold": 0.12, "fx": ""},
+		],
+	},
+	# The same body while its cast is running, and the one row in ANIM a unit is
+	# only ever drawn out of for a few seconds at a time. He turns off the lane
+	# and faces the field with the hourglass held up, which is the pose the sheet
+	# draws for holding the hour open rather than for throwing anything at
+	# anybody. The loop is that one drawing at two leans, so he sways over it
+	# instead of standing to attention -- two poses would read as fidgeting, and
+	# a still one as the game having frozen him along with the enemy.
+	#
+	# The attack row is the ordinary one: an hour held open is not a reason to
+	# stop shooting, and swapping his throw out mid-cast would cost him five
+	# seconds of damage on top of the twenty he already waits.
+	#
+	# Its first frame is the standing drawing off the row above rather than one
+	# of its own, and that is what makes the swap invisible: every row registers
+	# on its own first frame, so two rows that share one are two rows that plant
+	# the feet in the same place. The channelling pose is drawn half again the
+	# size of the standing one on the sheet, and "scale" is what holds it at the
+	# height he was already standing at rather than letting him grow into it.
+	"hero_cronomancer_aura": {
+		"hit": 4, "tint": Color(0.66, 0.84, 1.0), "shot": "res://art/hero_cronomancer_shot_0.png",
+		"idle": [
+			{"tex": "res://art/hero_cronomancer_aura_0.png", "foot": Vector2(60, 164), "hold": 0.55, "lean": -2.0, "scale": 0.80},
+			{"tex": "res://art/hero_cronomancer_aura_0.png", "foot": Vector2(60, 164), "hold": 0.55, "lean": 2.0, "scale": 0.80},
+		],
+		"frames": [
+			{"tex": "res://art/hero_cronomancer_idle_0.png", "foot": Vector2(54, 130), "hold": 0.0, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_0.png", "foot": Vector2(52, 135), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_1.png", "foot": Vector2(46, 136), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_2.png", "foot": Vector2(56, 132), "hold": 0.07, "fx": "charge"},
+			{"tex": "res://art/hero_cronomancer_atk_3.png", "foot": Vector2(67, 135), "hold": 0.09, "fx": "release_big"},
+			{"tex": "res://art/hero_cronomancer_atk_4.png", "foot": Vector2(60, 133), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_5.png", "foot": Vector2(58, 130), "hold": 0.05, "fx": ""},
+			{"tex": "res://art/hero_cronomancer_atk_6.png", "foot": Vector2(59, 141), "hold": 0.12, "fx": ""},
+		],
+	},
 }
 
 signal died(defender: Defender)
@@ -300,6 +547,50 @@ var totem_radius: float = 0.0
 var totem_haste: float = 1.0
 var totem: Node2D = null
 var has_planted: bool = false
+
+# ------------------------------------------------------------------- heroes
+#
+# The one thing a hero has that no merge can produce: a passive that rides on
+# every blow it lands. Each is read straight off the def and left at its
+# neutral value for everything else on the field, so nothing outside this
+# block has to ask whether a unit is a hero before using it.
+#
+# hero_slow    what the blow multiplies the struck body's pace by (1.0 = none)
+# hero_mend    the share of its own missing health a landed hit gives back
+# hero_pierce  the half-width of the corridor a shot keeps travelling down
+# hero_knock   how far back the blow throws everything around where it lands
+# hero_skull   whether a kill leaves a skull standing on the spot
+# hero_venom   the rot a landed shot leaves behind, and for how long
+var hero_slow: float = 1.0
+var hero_slow_time: float = 0.0
+# What colour the slow paints the struck body. Two heroes slow things now and
+# they are not the same effect to look at: violet is the void master pulling on
+# something, blue is the cronomancer's hour dragging at it.
+var hero_slow_tint: Color = Enemy.SLOW_TINT
+var hero_mend: float = 0.0
+var hero_pierce: float = 0.0
+var hero_knock: float = 0.0
+var hero_knock_radius: float = 0.0
+var hero_skull: bool = false
+var hero_venom: float = 0.0
+var hero_venom_time: float = 0.0
+# What its blow leaves on the body it lands on, off the hero's own design
+# sheet. Resolved once here rather than looked up per hit, and "" for
+# everything that has no such drawing -- which is every unit but four.
+var hero_hit_art: String = ""
+
+func is_hero() -> bool:
+	return UnitDatabase.is_hero(unit_id)
+
+# The dartmaster's is the poison cloud rather than the dart's own spark: it is
+# the one hero whose whole point happens after the shot lands, and a flash
+# would say nothing about it.
+static func hero_burst_art(id: String) -> String:
+	for suffix in ["_cloud_0", "_hit_0"]:
+		var path := "res://art/%s%s.png" % [id, suffix]
+		if ResourceLoader.exists(path):
+			return path
+	return ""
 
 # Set by CombatManager each frame from whatever circles this unit is standing
 # in: the shaman's totems speed it up, an ice wizard's fields slow it down.
@@ -383,6 +674,12 @@ var _dir_sets: Array = []
 var _default_frames: Array = []
 var _dir_index: int = -1
 
+# The drawn standing loop, for the units that have one. Empty for everything
+# else, and that emptiness is what leaves those units on the scale-breath.
+var _idle_frames: Array = []
+var _idle_index: int = 0
+var _idle_frame_timer: float = 0.0
+
 func setup(id: String) -> void:
 	unit_id = id
 	var d: Dictionary = UnitDatabase.get_def(id)
@@ -404,6 +701,17 @@ func setup(id: String) -> void:
 	totem_art = String(d.get("totem_art", ""))
 	totem_radius = d.get("totem_radius", 0.0)
 	totem_haste = d.get("totem_haste", 1.0)
+	hero_slow = d.get("hero_slow", 1.0)
+	hero_slow_time = d.get("hero_slow_time", 0.0)
+	hero_slow_tint = d.get("hero_slow_tint", Enemy.SLOW_TINT)
+	hero_mend = d.get("hero_mend", 0.0)
+	hero_pierce = d.get("hero_pierce", 0.0)
+	hero_knock = d.get("hero_knock", 0.0)
+	hero_knock_radius = d.get("hero_knock_radius", 0.0)
+	hero_skull = d.get("hero_skull", false)
+	hero_venom = d.get("hero_venom", 0.0)
+	hero_venom_time = d.get("hero_venom_time", 0.0)
+	hero_hit_art = hero_burst_art(id) if bool(d.get("is_hero", false)) else ""
 	_apply_upgrades(id)
 	# Everything above is what this kind of unit is worth; everything this
 	# particular body goes on to earn is measured off it. See the experience
@@ -461,6 +769,7 @@ func _apply_upgrades(id: String) -> void:
 			aoe_radius *= m.get("mage_aoe", 1.0)
 			attack_interval /= m.get("mage_aspd", 1.0)
 	damage *= m.get("defender_damage", 1.0)
+	damage *= BlessingManager.defender_damage_mult()
 
 # --------------------------------------------------------------- experience
 #
@@ -517,10 +826,32 @@ func xp_to_next() -> int:
 func is_max_level() -> bool:
 	return unit_level >= MAX_LEVEL
 
-# Credited by whatever landed the killing blow; see Enemy.take_damage.
-func record_kill(xp_value: int) -> void:
+# Credited by whatever landed the killing blow; see Enemy.take_damage. `at` is
+# where the body fell, `size` how big it was and `enemy_id` what it was -- all
+# three of which only the zombie lord has any use for, because all three are
+# what his skull has to remember to be able to raise the thing later.
+func record_kill(xp_value: int, at: Vector2 = Vector2.INF, size: float = 1.0,
+		enemy_id: String = "") -> void:
 	kills += 1
 	gain_xp(xp_value)
+	if hero_skull:
+		_leave_skull(at if at.is_finite() else global_position, size, enemy_id)
+
+# On the ground layer rather than on us: the mark outlives the body it was left
+# for and, often enough, the hero that left it. Registered with CombatManager
+# on the way down, because his ability has to be able to find every one of them
+# without walking the scene tree for it.
+func _leave_skull(at: Vector2, size: float, enemy_id: String) -> void:
+	var host: Node2D = CombatManager.ground_layer
+	if host == null or not is_instance_valid(host):
+		host = get_parent() as Node2D
+	if host == null:
+		return
+	var mark := SkullMark.new()
+	host.add_child(mark)
+	mark.global_position = at
+	mark.play(size, enemy_id)
+	CombatManager.add_skull(mark)
 
 func gain_xp(amount: int) -> void:
 	if amount <= 0 or hp <= 0.0 or is_max_level():
@@ -536,6 +867,7 @@ func gain_xp(amount: int) -> void:
 	if gained > 0:
 		_apply_level()
 		_play_level_up()
+		_check_ascension()
 
 # Rebuilt from the base stats every time, which is also how a unit arrives at
 # the numbers it is created with.
@@ -557,6 +889,157 @@ func heal(amount: float) -> void:
 		return
 	hp = minf(max_hp, hp + amount)
 
+# ---------------------------------------------------------------- ascension
+#
+# The one promotion in the game that is visible on the body rather than on a
+# card. A hero whose def names an "ascend_anim" swaps to a second set of
+# drawings the moment its ability comes in -- the zombie lord stops being a
+# corpse with a grudge and becomes the thing painted on the front of his own
+# design sheet.
+#
+# Nothing but the art changes. The stat jump the moment deserves is already
+# there: the button over the shop lights up on the same level, and that is a
+# far larger swing than any number would be. Adding damage on top would make
+# the level that unlocks the cast the only level of the thirty that mattered.
+#
+# The changeover is not a cut. The same plume of dark fire that raises his dead
+# plays over him first, and the new body is handed to it as the thing to reveal
+# -- so the player sees the upgrade happen rather than noticing afterwards that
+# it did.
+
+var _ascended: bool = false
+
+func _ascend_anim() -> String:
+	return String(UnitDatabase.get_def(unit_id).get("ascend_anim", ""))
+
+func _check_ascension() -> void:
+	if _ascended or hp <= 0.0:
+		return
+	var next: String = _ascend_anim()
+	if next == "" or not ANIM.has(next):
+		return
+	if unit_level < ability_level():
+		return
+	_ascended = true
+
+	var host: Node2D = CombatManager.ground_layer
+	if host == null or not is_instance_valid(host):
+		host = get_parent() as Node2D
+	if host == null:
+		_swap_anim(next)
+		return
+
+	var rise := DarkRise.new()
+	host.add_child(rise)
+	rise.global_position = global_position
+	# Half again the size it plays at over a skull: this is the one it is
+	# announcing, and it should tower over him rather than lap at his boots.
+	rise.play(1.6, func() -> void: _swap_anim(next))
+
+# Swaps which entry of ANIM this body is drawn out of. Everything downstream --
+# the attack tween, the idle loop, the held pose -- reads `_frames` and
+# `_idle_frames`, so rebuilding those is the whole of it.
+func _swap_anim(key: String) -> void:
+	if not is_instance_valid(_visual) or not (_visual is Sprite2D):
+		return
+	if _frame_tween != null and _frame_tween.is_valid():
+		_frame_tween.kill()
+	if _idle_tween != null and _idle_tween.is_valid():
+		_idle_tween.kill()
+
+	_anim_key = key
+	_frames = []
+	_default_frames = []
+	_idle_frames = []
+	_dir_sets = []
+	_dir_index = -1
+	_idle_index = 0
+	_idle_frame_timer = 0.0
+	_build_frames()
+	if _frames.is_empty():
+		return
+
+	# Held at the size the body was built at rather than rebuilt from the new
+	# drawing: the ascended sheet paints him larger than the plain one, and that
+	# extra height is the promotion showing on the field.
+	_frame_scale = 1.0
+	_rest_pose()
+	_start_idle_animation()
+
+	# The shadow was measured off the old drawing's boots and the new drawing
+	# stands taller, so it has to be put back under the new ones or the body
+	# floats a little above its own shade.
+	if _shadow != null and is_instance_valid(_shadow):
+		var sprite := _visual as Sprite2D
+		_shadow.setup(_radius * 0.86,
+			Vector2(0, GroundShadow.feet_offset(_frames[0]["tex"]) * sprite.scale.y))
+
+# ------------------------------------------------------------ the hour open
+#
+# A hero drawn out of a second row of ANIM for as long as its cast is running,
+# and put back into its own when the cast closes. Ascension above is this same
+# swap made permanently; this is the same machinery lent out for five seconds.
+#
+# Only the cronomancer has one so far, and what it is for is legibility: his
+# ability does nothing the player can see happen to him -- no blow lands, no
+# body falls -- so unless he visibly changes for the length of it, the only
+# evidence it was ever cast is the enemy being slower, which is exactly the sort
+# of thing a player reads as the game stuttering.
+
+var _aura_timer: float = 0.0
+var _aura_field: ChronoField = null
+
+func aura_anim() -> String:
+	return String(UnitDatabase.get_def(unit_id).get("aura_anim", ""))
+
+func is_channelling() -> bool:
+	return _aura_timer > 0.0
+
+# Re-cast while one is already running renews it rather than standing a second
+# dome up inside the first.
+func enter_aura(seconds: float, tint: Color) -> void:
+	if seconds <= 0.0 or hp <= 0.0:
+		return
+	_aura_timer = maxf(_aura_timer, seconds)
+
+	var key: String = aura_anim()
+	if key != "" and ANIM.has(key) and _anim_key != key:
+		_swap_anim(key)
+
+	if _aura_field == null or not is_instance_valid(_aura_field):
+		_aura_field = ChronoField.new()
+		add_child(_aura_field)
+		_aura_field.play(_radius, _feet_line(), tint)
+
+# Where the body meets the floor, in this node's own space. The same figure the
+# shadow is hung from, and asked the same way -- off the drawing's own alpha --
+# so anything standing on this line stands where the boots do.
+func _feet_line() -> float:
+	if not (_visual is Sprite2D) or _frames.is_empty():
+		return _radius * 0.5
+	var sprite := _visual as Sprite2D
+	return GroundShadow.feet_offset(sprite.texture) * sprite.scale.y
+
+func tick_aura(delta: float) -> void:
+	if _aura_timer <= 0.0:
+		return
+	_aura_timer = maxf(0.0, _aura_timer - delta)
+	if _aura_timer <= 0.0:
+		_exit_aura()
+
+func _exit_aura() -> void:
+	_aura_timer = 0.0
+	if _aura_field != null and is_instance_valid(_aura_field):
+		_aura_field.close()
+	_aura_field = null
+	# Back to whichever row this body belongs to when it is not channelling: the
+	# ascended one if it has earned one, and its own otherwise.
+	var back: String = _ascend_anim() if _ascended else ""
+	if back == "" or not ANIM.has(back):
+		back = unit_id
+	if ANIM.has(back) and _anim_key != back:
+		_swap_anim(back)
+
 # ---------------------------------------------------------- special ability
 #
 # The one thing no merge can hand a unit: a blow the player throws by hand.
@@ -568,6 +1051,10 @@ func heal(amount: float) -> void:
 var _ability_timer: float = 0.0
 
 func ability_def() -> Dictionary:
+	# A hero's is its own -- it never came out of a merge tier, so the tier gate
+	# below has nothing to say about it.
+	if is_hero():
+		return UnitDatabase.get_hero_ability(unit_id)
 	if int(UnitDatabase.get_def(unit_id).get("level", 0)) < ABILITY_TIER:
 		return {}
 	return UnitDatabase.get_ability(unit_id)
@@ -575,8 +1062,16 @@ func ability_def() -> Dictionary:
 func has_ability() -> bool:
 	return not ability_def().is_empty()
 
+# The level this particular body's cast comes in at. A hero's is half a merged
+# unit's, because a hero is one body chosen before the run and kept the whole
+# way through it rather than one of several of its kind -- twenty levels of
+# holding a lane is the price of a merged unit's special, and ten is the price
+# of the run being built around this one.
+func ability_level() -> int:
+	return UnitDatabase.HERO_ABILITY_LEVEL if is_hero() else ABILITY_LEVEL
+
 func ability_unlocked() -> bool:
-	return has_ability() and unit_level >= ABILITY_LEVEL
+	return has_ability() and unit_level >= ability_level()
 
 func ability_ready() -> bool:
 	return ability_unlocked() and _ability_timer <= 0.0 and is_alive() and not held
@@ -781,10 +1276,27 @@ func _build_shadow(radius: float, sprite: Sprite2D) -> void:
 		Vector2(0, GroundShadow.feet_offset(sprite.texture) * sprite.scale.y))
 	add_child(_shadow)
 
+# The drawn standing loop, advanced a frame at a time. It runs only when nothing
+# else owns the body: an attack is playing its own row, a frozen unit is meant to
+# have gone still, and one up in the player's hand holds the pose it was lifted
+# in. Anything without an "idle" row in ANIM falls straight back out of here.
+func _tick_idle_frames(delta: float) -> void:
+	if _idle_frames.size() < 2 or held or is_frozen() or hp <= 0.0:
+		return
+	if _frame_tween != null and _frame_tween.is_valid():
+		return
+	_idle_frame_timer -= delta
+	if _idle_frame_timer > 0.0:
+		return
+	_idle_index = (_idle_index + 1) % _idle_frames.size()
+	_idle_frame_timer = maxf(float(_idle_frames[_idle_index]["hold"]), 0.04)
+	_apply_frame(_idle_frames, _idle_index)
+
 # A unit that never moves still has to be re-lit: the map itself changes when
 # winter lands, a green-lit knight standing in the snow is the same fault as
 # before only backwards, and the sun goes down over the whole run besides.
 func _process(delta: float) -> void:
+	_tick_idle_frames(delta)
 	_light_timer -= delta
 	if _light_timer > 0.0:
 		return
@@ -809,8 +1321,14 @@ func _process(delta: float) -> void:
 # Tiers that share another's drawn frames. The vine sheet draws the cast once
 # and all three mages perform it; they are told apart by size and by what the
 # vine does after it lands.
+# Which entry of ANIM this body is drawn out of. Ordinarily its own id, but a
+# hero that has come into its power is drawn out of a second entry from then on
+# -- see _ascend above -- so every reader goes through this rather than through
+# `unit_id`.
+var _anim_key: String = ""
+
 func _anim_def() -> Dictionary:
-	return ANIM.get(unit_id, {})
+	return ANIM.get(_anim_key if _anim_key != "" else unit_id, {})
 
 func _build_frames() -> void:
 	var def: Dictionary = _anim_def()
@@ -829,6 +1347,9 @@ func _build_frames() -> void:
 
 	_frames = _register(list, from_foot)
 	_default_frames = _frames
+	# Registered against the same first frame as everything else, which is what
+	# keeps a hero standing exactly where it stood as the loop cycles.
+	_idle_frames = _register(def.get("idle", []), from_foot)
 
 	# Every heading registers against the default row's foot rather than against
 	# its own first frame. Re-registering per heading would leave each row with
@@ -866,8 +1387,8 @@ func _register(list: Array, from_foot: Vector2) -> Array:
 			"tex": tex,
 			"offset": tex.get_size() * 0.5 - anchor,
 			"scale": k,
-			"hold": float(f["hold"]),
-			"fx": String(f["fx"]),
+			"hold": float(f.get("hold", 0.0)),
+			"fx": String(f.get("fx", "")),
 			"lean": float(f.get("lean", 0.0)),
 		})
 	return out
@@ -918,7 +1439,7 @@ func set_facing(dir: Vector2) -> void:
 		_facing = 1.0 if dir.x >= 0.0 else -1.0
 		if _visual is Sprite2D:
 			(_visual as Sprite2D).flip_h = _facing < 0.0
-			_show_frame(0)
+			_rest_pose()
 		return
 
 	# A zero vector has no angle to read, and it turns up whenever something asks
@@ -935,12 +1456,24 @@ func set_facing(dir: Vector2) -> void:
 	_frames = _dir_sets[set_index]
 	if _visual is Sprite2D:
 		(_visual as Sprite2D).flip_h = _facing < 0.0
-		_show_frame(0)
+		_rest_pose()
 
 func _show_frame(i: int) -> void:
-	if not (_visual is Sprite2D) or i < 0 or i >= _frames.size():
+	_apply_frame(_frames, i)
+
+# The pose a body settles into with nothing playing. For a unit with a drawn
+# standing loop that is wherever the loop has got to, not the first frame --
+# turning to face a new lane should not visibly reset the breathing.
+func _rest_pose() -> void:
+	if _idle_frames.size() > 1:
+		_apply_frame(_idle_frames, _idle_index)
+	else:
+		_show_frame(0)
+
+func _apply_frame(list: Array, i: int) -> void:
+	if not (_visual is Sprite2D) or i < 0 or i >= list.size():
 		return
-	var f: Dictionary = _frames[i]
+	var f: Dictionary = list[i]
 	var sprite := _visual as Sprite2D
 	sprite.texture = f["tex"]
 	var off: Vector2 = f["offset"]
@@ -972,6 +1505,13 @@ func _rest_scale() -> Vector2:
 func _start_idle_animation() -> void:
 	if _idle_tween != null and _idle_tween.is_valid():
 		_idle_tween.kill()
+	# A unit with a drawn standing loop breathes in its own art; a scale wobble
+	# on top of that is two idles fighting over one body. All this owes it is
+	# putting the scale back where the frames expect to find it.
+	if _idle_frames.size() > 1:
+		if is_instance_valid(_visual):
+			_visual.scale = _rest_scale()
+		return
 	var rest: Vector2 = _rest_scale()
 	_idle_tween = create_tween()
 	_idle_tween.set_loops()
@@ -1006,7 +1546,7 @@ func play_attack(aim: Vector2, on_hit: Callable) -> void:
 	for i in range(1, _frames.size()):
 		_frame_tween.tween_callback(_enter_frame.bind(i, dir, on_hit))
 		_frame_tween.tween_interval(float(_frames[i]["hold"]))
-	_frame_tween.tween_callback(_show_frame.bind(0))
+	_frame_tween.tween_callback(_rest_pose)
 	_frame_tween.tween_callback(_start_idle_animation)
 
 func _enter_frame(i: int, dir: Vector2, on_hit: Callable) -> void:
@@ -1014,6 +1554,16 @@ func _enter_frame(i: int, dir: Vector2, on_hit: Callable) -> void:
 	_frame_fx(i, dir)
 	if i == _hit_frame and on_hit.is_valid():
 		on_hit.call()
+
+# How long the drawn attack runs, end to end. Anything that wants to play an
+# animation on this body and be sure it finishes has to know how long the body
+# is busy for, because the next ordinary swing will otherwise cut straight
+# across it -- see CombatManager._play_cast.
+func attack_length() -> float:
+	var total := 0.0
+	for f in _frames:
+		total += float(f["hold"])
+	return total
 
 # ------------------------------------------------------------- frame effects
 #
@@ -1332,7 +1882,7 @@ func freeze(seconds: float) -> void:
 		_idle_tween.kill()
 	if _frame_tween != null and _frame_tween.is_valid():
 		_frame_tween.kill()
-	_show_frame(0)
+	_rest_pose()
 
 	if not is_instance_valid(_visual):
 		return
@@ -1436,7 +1986,7 @@ func lift() -> void:
 		_idle_tween.kill()
 	if _frame_tween != null and _frame_tween.is_valid():
 		_frame_tween.kill()
-	_show_frame(0)
+	_rest_pose()
 	z_index = HELD_Z
 
 	var tw := create_tween()
@@ -1504,6 +2054,30 @@ func sell() -> void:
 	tw.parallel().tween_property(self, "modulate:a", 0.0, 0.22)
 	tw.tween_callback(queue_free)
 
+# Taken off the field the same way a sale is -- unhooked from the lane, from
+# whatever was fighting it and from its totem by the same `died` signal -- but
+# nothing is paid out, because nothing was sold. The body is on its way back to
+# the tray as a fresh piece of the same kind, not gone, so there is no gold
+# burst to sell an exit that was not one.
+func recall() -> void:
+	if hp <= 0:
+		return
+	hp = 0.0
+	held = false
+	if _idle_tween != null and _idle_tween.is_valid():
+		_idle_tween.kill()
+	if _frame_tween != null and _frame_tween.is_valid():
+		_frame_tween.kill()
+	died.emit(self)
+
+	var tw := create_tween()
+	tw.tween_property(self, "position:y", position.y - 26.0, 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(self, "scale", Vector2(1.15, 1.15), 0.10) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(self, "modulate:a", 0.0, 0.22)
+	tw.tween_callback(queue_free)
+
 func is_alive() -> bool:
 	return hp > 0
 
@@ -1549,5 +2123,11 @@ func process_combat(delta: float) -> void:
 	# starts -- so whether the target is still there is a question that has
 	# to be asked then, not now.
 	play_attack(hit.global_position - global_position, func() -> void:
-		if is_instance_valid(hit) and hit.is_alive():
-			hit.take_damage(damage, global_position, false, self))
+		if not is_instance_valid(hit) or not hit.is_alive():
+			return
+		var landed: Vector2 = hit.global_position
+		hit.take_damage(damage, global_position, false, self)
+		# After the blow, so a hero's passive reads the body it actually left
+		# standing rather than one the damage has already taken off the field.
+		CombatManager.hero_touch(self, hit)
+		CombatManager.hero_land(self, landed))

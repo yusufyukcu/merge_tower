@@ -15,6 +15,7 @@ const UIStyle = preload("res://scripts/ui/UIStyle.gd")
 
 signal resume_requested
 signal restart_requested
+signal exit_requested
 
 const ART := "res://art/pause.png"
 const ART_SIZE := Vector2(647.0, 702.0)
@@ -102,16 +103,11 @@ func _build_menu_page(view_size: Vector2) -> void:
 	_hit_row(ROW_RESTART, Color(1, 0.7, 0.6)).pressed.connect(
 		func() -> void: restart_requested.emit())
 
-	# There is nowhere to exit to -- the game has no menu scene -- so the row is
-	# painted but greyed out rather than pretending to work.
-	var exit_btn := _hit_row(ROW_EXIT, Color(1, 1, 1))
-	exit_btn.disabled = true
-	var veil := ColorRect.new()
-	veil.color = Color(0, 0, 0, 0.55)
-	veil.position = exit_btn.position
-	veil.size = exit_btn.size
-	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_menu_page.add_child(veil)
+	# This row was painted-but-greyed for as long as there was nowhere to go.
+	# There is now: the menu is the game's own main scene, so the row answers
+	# like the other three and Main decides what leaving a run means.
+	_hit_row(ROW_EXIT, Color(0.72, 0.84, 1.0)).pressed.connect(
+		func() -> void: exit_requested.emit())
 
 # An invisible hit box on one of the painted rows. All it adds is the press
 # feedback a painting cannot give: a brief wash of light across the plate.

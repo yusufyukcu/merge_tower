@@ -33,7 +33,10 @@ var _back: Node2D = null        # sibling, drawn before the body
 var _bands: Array = []          # [{ "node": Sprite2D, "y": float, "w": float }]
 var _bubbles: Sprite2D = null
 
-func setup(radius: float) -> void:
+# `with_bands` is what a poison with no hold behind it turns off. The dartmaster
+# rots a body without tying it down, and a creeper wound round something that is
+# still walking freely reads as a bug rather than as venom.
+func setup(radius: float, with_bands: bool = true) -> void:
 	_radius = radius
 	z_index = 1   # the front half, over the body, under the health bar
 
@@ -44,7 +47,8 @@ func setup(radius: float) -> void:
 		# First child: same layer as the body, drawn just before it.
 		host.move_child(_back, 0)
 
-	_build_bands()
+	if with_bands:
+		_build_bands()
 
 	if ResourceLoader.exists(TEX_BUBBLES):
 		_bubbles = Sprite2D.new()

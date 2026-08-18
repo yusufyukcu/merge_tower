@@ -28,6 +28,9 @@ UpgradeManager="*res://scripts/autoload/UpgradeManager.gd"
 SpawnManager="*res://scripts/autoload/SpawnManager.gd"
 WaveManager="*res://scripts/autoload/WaveManager.gd"
 MusicPlayer="*res://scripts/autoload/MusicPlayer.gd"
+Sfx="*res://scripts/autoload/Sfx.gd"
+BlessingManager="*res://scripts/autoload/BlessingManager.gd"
+MetaManager="*res://scripts/autoload/MetaManager.gd"
 
 [display]
 

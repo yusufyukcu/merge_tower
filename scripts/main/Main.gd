@@ -3,6 +3,7 @@
 const UIStyle = preload("res://scripts/ui/UIStyle.gd")
 const PauseMenu = preload("res://scripts/ui/PauseMenu.gd")
 const ShopPanel = preload("res://scripts/ui/ShopPanel.gd")
+const HeroAbilityButton = preload("res://scripts/ui/HeroAbilityButton.gd")
 const MergeEffect = preload("res://scripts/fx/MergeEffect.gd")
 const ImpactEffect = preload("res://scripts/fx/ImpactEffect.gd")
 const CoinDrop = preload("res://scripts/fx/CoinDrop.gd")
@@ -62,6 +63,7 @@ const ARENA_AREA_BOTTOM := MERGE_ART_TOP   # the arena runs right down to the pa
 const MAX_DEFENDERS := 20
 const FORTRESS_BASE_HP := 100.0
 const UPGRADE_CHOICES := 3
+const UPGRADE_CARD_SLOTS := 4
 
 var merge_layer: Node2D
 var ground_layer: Node2D
@@ -86,6 +88,11 @@ var next_swatch: Panel
 var send_button: Button
 var shop_button: Button
 var shop_panel: ShopPanel
+var hero_button: HeroAbilityButton
+# The hero this run marched out with, kept because the button over the shop has
+# to ask it something once a frame and there is no other way to find it: it is
+# one of twenty defenders and it never advertises itself.
+var hero_unit: Defender = null
 var coin_panel: Control
 var coin_label: Label
 var units_panel: Control
@@ -99,10 +106,23 @@ var pause_menu: PauseMenu
 var screen_flash: ColorRect
 var game_over_panel: Control
 var defeat_plate: TextureRect
+var essence_label: Label
 var upgrade_panel: Control
 var upgrade_title: Label
 var upgrade_cards: Array = []
-var upgrade_card_ids: Array = ["", "", ""]
+var upgrade_card_ids: Array = ["", "", "", ""]
+
+# Waves fought without a scratch on the fortress, and the point the merge
+# combo indicator lives at. Both are pure feel -- nothing here changes what a
+# wave costs to clear, only how clearing one cleanly is noticed.
+var _clean_streak: int = 0
+var _last_fortress_hp: float = -1.0
+var combo_label: Label = null
+var modifier_banner: Label = null
+# Set the moment the ice dragon itself goes down, not merely once its wave is
+# past -- MetaManager's dragon unlock is earned by the kill, not the wave
+# counter reaching it.
+var _beat_dragon: bool = false
 
 func _ready() -> void:
 	randomize()
@@ -111,6 +131,7 @@ func _ready() -> void:
 	CombatManager.reset_state()
 	SpawnManager.reset()
 	UpgradeManager.reset()
+	BlessingManager.reset()
 	# Before anything is built, because the fires on the map register themselves
 	# with it as they go up and the statics outlive a restarted run.
 	Lighting.reset()
@@ -125,13 +146,86 @@ func _ready() -> void:
 	GameManager.state_changed.connect(_on_game_state_changed)
 	GameManager.coins_changed.connect(_on_coins_changed)
 	MergeManager.unit_created.connect(_on_unit_created)
+	MergeManager.combo_changed.connect(_on_combo_changed)
 	WaveManager.spawn_enemy_requested.connect(_on_spawn_enemy_requested)
 	WaveManager.wave_started.connect(_on_wave_started)
 	WaveManager.wave_cleared.connect(_on_wave_cleared)
 	CombatManager.focus_changed.connect(_on_focus_changed)
+	CombatManager.boss_slam_landed.connect(_on_boss_slam_landed)
 
+	# The tray stays empty and the fight stays unstarted until a blessing is
+	# picked -- _begin_run() is what used to sit here directly.
+	_show_blessing_selection()
+
+# How long the run that just ended actually took to reach wave 30, wall clock
+# from the moment the blessing was chosen rather than from _ready() -- the
+# blessing screen itself should never count against a speed record.
+var _run_start_ms: int = 0
+
+# Everything a blessing can only be applied to once the player has actually
+# picked one: the fortress it starts with, the field it starts with, the
+# upgrade level it starts with. Held back from _ready() itself so none of it
+# runs before there is a blessing to read.
+func _begin_run() -> void:
+	_run_start_ms = Time.get_ticks_msec()
+	if fortress != null:
+		fortress.max_hp = maxf(10.0,
+			(FORTRESS_BASE_HP + BlessingManager.fortress_hp_delta()) * BlessingManager.fortress_hp_mult())
+		fortress.hp = fortress.max_hp
+		_on_fortress_hp_changed(fortress.hp, fortress.max_hp)
+	GameManager.unit_slots += BlessingManager.bonus_slots()
+	var seed_id: String = BlessingManager.seed_upgrade_id()
+	if seed_id != "":
+		UpgradeManager.apply(seed_id)
+	# Branch mastery bought from the menu shop: a permanent head start on
+	# whichever "_spawn" upgrades essence has already paid for, applied the
+	# same way a blessing's own seed is -- by calling the normal upgrade path
+	# that many times before the first piece ever drops.
+	for id in MetaManager.META_UPGRADE_IDS:
+		for i in range(MetaManager.meta_upgrade_level(id)):
+			UpgradeManager.apply(id)
+
+	_spawn_hero()
 	_spawn_initial()
 	WaveManager.start()
+
+# ---------------------------------------------------------------------- hero
+#
+# The one unit a run never has to build. Whichever of the six was chosen on the
+# menu is already standing on the ring before the first piece falls into the
+# tray, which is the whole promise of the hero screen: the choice made there is
+# visible on the field the second the run starts, not five merges in.
+#
+# It is handed the field slot it stands in rather than taking one, so picking a
+# hero never quietly costs the player a merged unit they would otherwise have
+# fielded -- and because it is dispatched before anything else, it always gets
+# the pick of an empty board.
+func _spawn_hero() -> void:
+	var id: String = MetaManager.hero_id()
+	if id == "" or not UnitDatabase.is_unit(id):
+		return
+	var role: String = UnitDatabase.get_def(id).get("role", "melee")
+	var lane: int = _pick_lane(role)
+	if lane < 0:
+		return
+	var slot: int = _free_slot(lane, role)
+	if slot < 0:
+		return
+
+	GameManager.unit_slots += 1
+	# Held onto for the ability button, which needs to ask this one body about
+	# its cooldown every frame for the rest of the run.
+	hero_unit = _spawn_defender(id, lane, slot)
+	if hero_unit == null:
+		return
+
+	# It arrives rather than appearing. One beat of ground breaking under it is
+	# enough to say the run has started with somebody already on the field.
+	var at: Vector2 = _lane_slot_position(lane, role, slot)
+	var fx := ImpactEffect.new()
+	ground_layer.add_child(fx)
+	fx.global_position = at
+	fx.play_ground_slam(UnitDatabase.get_def(id).get("color", UIStyle.ACCENT_GOLD), 1.2)
 
 # ---------------------------------------------------------------- background
 
@@ -462,6 +556,62 @@ func _build_merge_tray() -> void:
 
 	_build_danger_line()
 	_build_drop_guide()
+	_build_combo_label()
+
+# Merges landed back to back, read off MergeManager's own combo window rather
+# than kept here -- this is a display of that count, not a second copy of it.
+func _build_combo_label() -> void:
+	combo_label = Label.new()
+	combo_label.position = Vector2(0, MERGE_ART_TOP - 64.0)
+	combo_label.size = Vector2(VIEW_W, 50.0)
+	combo_label.pivot_offset = Vector2(VIEW_W * 0.5, 25.0)
+	combo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	combo_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	combo_label.add_theme_font_size_override("font_size", 32)
+	combo_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(combo_label, UIStyle.ACCENT_GOLD, 6)
+	combo_label.visible = false
+	add_child(combo_label)
+
+	modifier_banner = Label.new()
+	modifier_banner.position = Vector2(0, ARENA_AREA_TOP + 40.0)
+	modifier_banner.size = Vector2(VIEW_W, 56.0)
+	modifier_banner.pivot_offset = Vector2(VIEW_W * 0.5, 28.0)
+	modifier_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	modifier_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	modifier_banner.add_theme_font_size_override("font_size", 38)
+	modifier_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(modifier_banner, UIStyle.ACCENT_RED, 8)
+	modifier_banner.modulate.a = 0.0
+	add_child(modifier_banner)
+
+# How many merges into a streak the label has finished heating up. Past this it
+# is as big, as red and as crooked as it gets -- a ceiling, so a very long run
+# does not end up shouting over the tray it is reporting on.
+const COMBO_HOT := 6.0
+
+func _on_combo_changed(count: int) -> void:
+	if combo_label == null:
+		return
+	if count < 2:
+		combo_label.visible = false
+		return
+	# The streak is worth more the deeper it runs -- it buys rare-merge chance,
+	# and every merge inside it hits harder. The label carries that: the punch
+	# grows, the gold burns down to red, and a real run comes in crooked.
+	var heat: float = clampf(float(count - 2) / COMBO_HOT, 0.0, 1.0)
+	combo_label.visible = true
+	combo_label.text = "MERGE x%d" % count
+	combo_label.add_theme_color_override("font_color",
+		UIStyle.ACCENT_GOLD.lerp(UIStyle.ACCENT_RED, heat))
+	var punch: float = 1.22 + 0.5 * heat
+	combo_label.scale = Vector2(punch, punch)
+	combo_label.rotation = deg_to_rad(randf_range(-5.0, 5.0) * heat)
+	var tw := create_tween()
+	tw.tween_property(combo_label, "scale", Vector2.ONE, 0.18 + 0.10 * heat) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(combo_label, "rotation", 0.0, 0.26) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 # ------------------------------------------------------------------ overflow
 
@@ -506,7 +656,10 @@ func _piece_over_line() -> bool:
 
 func _update_overflow(delta: float) -> void:
 	if not GameManager.is_playing() or not _piece_over_line():
+		var was_ticking: bool = GameManager.is_playing() and _overflow_timer > 0.0
 		_reset_overflow()
+		if was_ticking:
+			_on_overflow_escaped()
 		return
 
 	_overflow_timer += delta
@@ -518,7 +671,9 @@ func _update_overflow(delta: float) -> void:
 		fortress.take_damage(fortress.hp)
 		return
 
-	# The closer to zero, the faster and harder the line beats.
+	# The closer to zero, the faster and harder the line beats -- and the same
+	# closeness rides the music, so the danger is heard as well as seen.
+	MusicPlayer.set_intensity(clampf(_overflow_timer / OVERFLOW_SECONDS, 0.0, 1.0))
 	_overflow_pulse += delta * (7.0 + (OVERFLOW_SECONDS - remaining) * 5.0)
 	var glow: float = 0.55 + 0.45 * sin(_overflow_pulse)
 	danger_line.default_color = Color(1.0, 0.28, 0.28, 0.35 + 0.65 * glow)
@@ -531,11 +686,20 @@ func _update_overflow(delta: float) -> void:
 func _reset_overflow() -> void:
 	_overflow_timer = 0.0
 	_overflow_pulse = 0.0
+	MusicPlayer.set_intensity(0.0)
 	if danger_line != null:
 		danger_line.default_color = DANGER_IDLE
 		danger_line.width = 4.0
 	if overflow_label != null:
 		overflow_label.visible = false
+
+# The pile came back down under the line with time still on the clock. A
+# close call that pays off rather than one that is simply over: a small purse
+# for the nerve it took, dropped where the danger line was.
+const OVERFLOW_ESCAPE_REWARD := 12
+
+func _on_overflow_escaped() -> void:
+	_pay_out(OVERFLOW_ESCAPE_REWARD, Vector2(VIEW_W * 0.5, DANGER_Y))
 
 # The two fire bowls flanking SEND, measured off the panel art (their flames
 # are centred at 256,812 and 1076,812 in the image). Added after the panel so
@@ -614,6 +778,7 @@ func _build_drop_guide() -> void:
 func _process(delta: float) -> void:
 	_update_overflow(delta)
 	_update_units_chip()
+	_update_hero_button()
 	_tick_field_touch()
 	_update_map_glows(delta)
 
@@ -847,6 +1012,57 @@ func _play_boss_entrance(e: Enemy) -> void:
 	tw.parallel().tween_property(e, "scale", Vector2.ONE, 0.5) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
+# ------------------------------------------------------------- shake & hit-stop
+#
+# The two cheapest things a fight can do to say a hit mattered. Main itself is
+# the Node2D every world layer hangs from -- ground, merge tray, combat, fx --
+# while the HUD sits on its own CanvasLayer above, untouched by either: the
+# shake moves the battlefield, never the numbers reporting on it.
+
+var _shake_tween: Tween = null
+
+# The SCREEN FX switch in the pause menu. Named for the whole family rather than
+# asked of each caller: a player who turned the flashes off did not mean "except
+# the shaking", and the merge tray now speaks often enough that they would
+# notice if it had been read that narrowly.
+func _screen_fx_on() -> bool:
+	return pause_menu == null or pause_menu.screen_fx_enabled
+
+func _shake(strength: float, duration: float = 0.24) -> void:
+	if not _screen_fx_on():
+		return
+	if _shake_tween != null and _shake_tween.is_valid():
+		_shake_tween.kill()
+	position = Vector2.ZERO
+	_shake_tween = create_tween()
+	_shake_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	var steps: int = maxi(4, int(duration * 30.0))
+	for i in range(steps):
+		var t: float = float(i + 1) / float(steps)
+		var falloff: float = 1.0 - t
+		var offset: Vector2 = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) \
+			* strength * falloff
+		_shake_tween.tween_property(self, "position", offset, duration / steps)
+	_shake_tween.tween_property(self, "position", Vector2.ZERO, 0.02)
+
+# A few frames at near-zero speed on the landing blow -- Engine.time_scale
+# affects everything paced by delta, physics included, so it is set back by a
+# real-time timer rather than one that would itself be slowed by it.
+var _hit_stop_active: bool = false
+
+func _hit_stop(duration: float = 0.06, scale: float = 0.05) -> void:
+	if _hit_stop_active or not GameManager.is_playing():
+		return
+	_hit_stop_active = true
+	Engine.time_scale = scale
+	get_tree().create_timer(duration, true, false, true).timeout.connect(
+		func() -> void:
+			Engine.time_scale = 1.0
+			_hit_stop_active = false)
+
+func _on_boss_slam_landed(_enemy: Enemy) -> void:
+	_shake(10.0, 0.28)
+
 # --------------------------------------------------------------------- gold
 
 # Big payouts come apart into several coins, so a boss showers the screen while
@@ -854,15 +1070,46 @@ func _play_boss_entrance(e: Enemy) -> void:
 const COIN_PER_DROP := 5.0
 const MAX_COIN_DROPS := 6
 
+# A kill is never quite the number on the tin: a small spread either way keeps
+# even a goblin from paying the exact same two gold every time, and every so
+# often the blow that lands is worth stopping to look at.
+const REWARD_VARIANCE := 1
+const CRIT_CHANCE := 0.08
+const CRIT_MULT := 2.0
+
 func _on_enemy_killed(enemy: Enemy) -> void:
-	_pay_out(int(UnitDatabase.get_enemy_def(enemy.enemy_id).get("reward", 2)),
-		enemy.global_position)
+	MetaManager.record_kill()
+	match enemy.enemy_id:
+		"ice_dragon":
+			_beat_dragon = true
+			MetaManager.grant_achievement("dragonslayer")
+		"stone_golem":
+			MetaManager.grant_achievement("stonebreaker")
+		"frost_troll":
+			MetaManager.grant_achievement("troll_slayer")
+
+	# The very first kill of the save file's life is never left to the dice:
+	# it lands as a guaranteed crit with its own (smaller) shake, so a new
+	# player's first taste of a kill mattering is not a coin flip either.
+	var first_kill: bool = MetaManager.consume_first_kill()
+	if enemy.is_boss:
+		_shake(16.0, 0.4)
+		_hit_stop(0.07, 0.04)
+	elif first_kill:
+		_shake(8.0, 0.15)
+
+	var base: int = int(UnitDatabase.get_enemy_def(enemy.enemy_id).get("reward", 2))
+	var reward: int = base + randi_range(-REWARD_VARIANCE, REWARD_VARIANCE)
+	if first_kill or randf() < CRIT_CHANCE:
+		reward = int(round(reward * CRIT_MULT))
+	_pay_out(maxi(1, reward), enemy.global_position)
 
 # Gold owed to the player, paid from a point on the field: a body that has just
 # fallen, or a unit the player has just sold off the board. Either way the coins
 # are what actually pay -- the counter moves as each one lands, not at the moment
 # the gold was earned.
-func _pay_out(reward: int, at: Vector2) -> void:
+func _pay_out(reward_in: int, at: Vector2) -> void:
+	var reward: int = int(round(reward_in * BlessingManager.gold_mult()))
 	if reward <= 0:
 		return
 
@@ -878,6 +1125,7 @@ func _pay_out(reward: int, at: Vector2) -> void:
 		coin.play(per + (1 if i < remainder else 0), coin_target)
 
 func _on_coin_collected(amount: int) -> void:
+	Sfx.coin()
 	GameManager.add_coins(amount)
 
 # -------------------------------------------------------------- drop control
@@ -1013,6 +1261,7 @@ func _release_current() -> void:
 	current_object.held = false
 	current_object.freeze = false
 	current_object = null
+	Sfx.drop()
 	_spawn_current_from_next()
 
 # ---------------------------------------------------------------------- send
@@ -1069,6 +1318,7 @@ func _on_send_pressed() -> void:
 		o.freeze = true
 		o.collision_layer = 0
 		o.collision_mask = 0
+		Sfx.send()
 		_animate_send(o, lane, slot)
 
 func _animate_send(o: MergeObject, lane: int, slot: int) -> void:
@@ -1083,6 +1333,14 @@ func _animate_send(o: MergeObject, lane: int, slot: int) -> void:
 			o.queue_free()
 		_clear_pending(lane, role, slot)
 		_spawn_defender(id, lane, slot)
+		# The very first successful send of the save file's life gets a small
+		# landing puff -- every one after it is silent, the way the game
+		# already leaves this moment otherwise.
+		if MetaManager.consume_first_send():
+			var fx := ImpactEffect.new()
+			ground_layer.add_child(fx)
+			fx.global_position = target
+			fx.play_ground_slam(UIStyle.ACCENT_GOLD, 0.8)
 	)
 
 func _clear_pending(lane: int, role: String, slot: int) -> void:
@@ -1094,9 +1352,13 @@ func _clear_pending(lane: int, role: String, slot: int) -> void:
 			_pending_sends.remove_at(i)
 			return
 
-func _spawn_defender(id: String, lane: int, slot: int) -> void:
+# Answers with the body it put on the field, or null if it could not: the hero
+# spawn needs to keep hold of the one it asked for, and picking it back out of
+# CombatManager's list afterwards is a guess that is wrong exactly when this
+# returned early.
+func _spawn_defender(id: String, lane: int, slot: int) -> Defender:
 	if CombatManager.defenders.size() >= _defender_limit():
-		return
+		return null
 	var role: String = UnitDatabase.get_def(id).get("role", "melee")
 	# The slot was reserved when the unit was dispatched and released a moment
 	# ago, so it is normally still ours. Somebody standing in it anyway means the
@@ -1105,7 +1367,7 @@ func _spawn_defender(id: String, lane: int, slot: int) -> void:
 	if _slot_taken(lane, role, slot):
 		slot = _free_slot(lane, role)
 		if slot < 0:
-			return
+			return null
 
 	var d := Defender.new()
 	d.setup(id)
@@ -1117,6 +1379,7 @@ func _spawn_defender(id: String, lane: int, slot: int) -> void:
 	# are painted facing right and have to be mirrored on the far side.
 	d.set_facing(d.global_position - ARENA_CENTER)
 	CombatManager.add_defender(d)
+	return d
 
 # ------------------------------------------------- units already on the field
 #
@@ -1467,7 +1730,7 @@ func _on_sell_pressed() -> void:
 	_clear_selection()
 	if d == null or not is_instance_valid(d) or not d.is_alive():
 		return
-	if not GameManager.is_playing():
+	if not GameManager.is_playing() or d.is_hero():
 		return
 	# Read before the sale: the unit is on its way out by the time it returns, and
 	# the gold has to come from where the body was standing.
@@ -1475,6 +1738,24 @@ func _on_sell_pressed() -> void:
 	var price: int = UnitDatabase.get_sell_price(d.unit_id)
 	d.sell()
 	_pay_out(price, at)
+
+# The other way off the field: back to the tray as the same piece it was sent
+# out as, rather than into gold. What frees the lane slot is the same `died`
+# signal a sale sends -- CombatManager unhooks it from combat and its totem the
+# same way either way -- the only difference is what happens to the unit
+# itself afterward.
+func _on_recall_pressed() -> void:
+	var d: Defender = _selected
+	_clear_selection()
+	if d == null or not is_instance_valid(d) or not d.is_alive():
+		return
+	# A hero has no piece in the tray to go back to -- there is no merge that
+	# ever produced it and none that could produce it again.
+	if not GameManager.is_playing() or d.is_hero():
+		return
+	var unit_id: String = d.unit_id
+	d.recall()
+	_drop_bought_piece(unit_id)
 
 # --------------------------------------------------------------------- carrying
 
@@ -1494,9 +1775,13 @@ func _begin_carry(d: Defender) -> void:
 	d.lift()
 	_build_carry_markers(d)
 
-# Every spot the carried unit could be set down in, drawn on the floor. Its own
-# ring only: a soldier holds the line and a shooter stands behind it, and that is
-# a rule of the formation rather than of where the player happens to let go.
+# Every spot the carried unit could be set down in, drawn on the floor -- its
+# own ring only, the same rule of the formation as ever. A free spot is still
+# gold; a spot already standing full is offered too, in purple, because
+# landing there no longer bounces the carried unit back -- it changes places
+# with whoever is standing on it. Only a slot a send is still in flight toward
+# is left off both lists: there is nothing there yet to swap with, and
+# nowhere free to land until it arrives.
 func _build_carry_markers(d: Defender) -> void:
 	_carry_slots = []
 	_carry_markers = []
@@ -1504,11 +1789,34 @@ func _build_carry_markers(d: Defender) -> void:
 	var radius: float = maxf(d.tap_radius(), SLOT_RING_RADIUS)
 	for lane in range(LANE_ANGLES.size()):
 		for i in range(_lane_capacity(d.role)):
-			if _slot_taken(lane, d.role, i, d):
+			if _pending_send_blocks(lane, d.role, i):
 				continue
+			var occupant: Defender = _defender_in_slot(lane, d.role, i, d)
 			var at: Vector2 = _lane_slot_position(lane, d.role, i)
-			_carry_slots.append({"lane": lane, "slot": i, "at": at})
-			_carry_markers.append(_make_slot_ring(at, radius, UIStyle.ACCENT_GOLD))
+			_carry_slots.append({"lane": lane, "slot": i, "at": at, "occupant": occupant})
+			var color: Color = UIStyle.ACCENT_PURPLE if occupant != null else UIStyle.ACCENT_GOLD
+			_carry_markers.append(_make_slot_ring(at, radius, color))
+
+# The defender already standing in a lane/slot, ignoring whichever body is
+# presently in the player's hand -- the same match _slot_taken makes, just
+# handing back who rather than whether.
+func _defender_in_slot(lane: int, role: String, slot: int, ignore: Defender) -> Defender:
+	var line: String = _lane_line(role)
+	for def in CombatManager.defenders:
+		if def == ignore:
+			continue
+		if is_instance_valid(def) and def.is_alive() and def.lane == lane \
+				and _lane_line(def.role) == line and def.slot == slot:
+			return def
+	return null
+
+func _pending_send_blocks(lane: int, role: String, slot: int) -> bool:
+	var line: String = _lane_line(role)
+	for p in _pending_sends:
+		if int(p["lane"]) == lane and _lane_line(String(p["role"])) == line \
+				and int(p["slot"]) == slot:
+			return true
+	return false
 
 func _carry_to(at: Vector2) -> void:
 	if not is_instance_valid(_carried):
@@ -1550,18 +1858,41 @@ func _end_carry(at: Vector2) -> void:
 	var lane: int = int(_carry_home.get("lane", 0))
 	var slot: int = int(_carry_home.get("slot", 0))
 	var to: Vector2 = _carry_home.get("at", ARENA_CENTER)
+	var home_lane: int = lane
+	var home_slot: int = slot
+	var home_at: Vector2 = to
 	# Nowhere near a standing spot: it goes back where it was picked up from.
 	var index: int = _slot_index_near(_carry_point(at)) if is_instance_valid(d) else -1
+	var occupant: Defender = null
 	if index >= 0:
 		var target: Dictionary = _carry_slots[index]
 		lane = int(target["lane"])
 		slot = int(target["slot"])
 		to = target["at"]
+		occupant = target.get("occupant") as Defender
 
 	_end_carry_state()
 	if d == null or not is_instance_valid(d):
 		return
-	_land_defender(d, lane, slot, to)
+	if occupant != null and is_instance_valid(occupant) and occupant.is_alive():
+		_swap_defenders(d, occupant, lane, slot, to, home_lane, home_slot, home_at)
+	else:
+		_land_defender(d, lane, slot, to)
+
+# Dropped on a spot that already has someone standing on it: the two change
+# places rather than the drop bouncing back to where the carried unit started.
+# Whoever was standing there leaves the same way the carried unit arrived --
+# claims let go, a totem uprooted if it planted one, lifted and landed -- just
+# handed both bodies instead of the one the player's own hand was on.
+func _swap_defenders(d: Defender, other: Defender, d_lane: int, d_slot: int, d_at: Vector2,
+		other_lane: int, other_slot: int, other_at: Vector2) -> void:
+	CombatManager.release_defender_claims(other)
+	if other.role == "support":
+		CombatManager.uproot_totem(other)
+	other.held = true
+	other.lift()
+	_land_defender(other, other_lane, other_slot, other_at)
+	_land_defender(d, d_lane, d_slot, d_at)
 
 # Puts whatever is in hand back down where it started, whatever the reason: the
 # shop opening, the wave ending, the game being lost out from under it.
@@ -1660,9 +1991,17 @@ var card_xp_label: Label
 var card_stat_values: Dictionary = {}
 var sell_button: Button
 var sell_price_label: Label
+var sell_caption: Label
+var sell_price_row: Control
+var recall_button: Button
+var recall_caption: Label
 var ability_button: Button
 var ability_name_label: Label
 var ability_state_label: Label
+# What stands in place of the whole button row on a hero's card: a hero is
+# never sold, never recalled and carries a passive instead of a cast, so the
+# three buttons have nothing to say and this says what it does instead.
+var hero_note: Label
 
 func _build_unit_card(root: Control) -> void:
 	unit_card = Control.new()
@@ -1796,13 +2135,17 @@ func _build_card_stats() -> void:
 
 		card_stat_values[String(spec["key"])] = value
 
-# The two things the player can do from here. Selling has been possible since
-# the card was a price tag; the ability is what twenty levels buys, and it sits
-# beside the sale rather than replacing it so the card never changes shape.
+# The three things the player can do from here. Selling has been possible
+# since the card was a price tag; recall sits next to it as the other way off
+# the field -- back to the tray instead of into gold, for the unit worth
+# keeping rather than cashing out; the ability is what twenty levels buys, and
+# it takes what is left of the row rather than replacing anything so the card
+# never changes shape.
 const CARD_BTN_Y := 200.0
 const CARD_BTN_H := 88.0
-const CARD_BTN_GAP := 16.0
-const CARD_SELL_W := 186.0
+const CARD_BTN_GAP := 14.0
+const CARD_SELL_W := 124.0
+const CARD_RECALL_W := 124.0
 
 func _build_card_buttons() -> void:
 	var inner: float = CARD_SIZE.x - CARD_PAD * 2.0
@@ -1815,16 +2158,16 @@ func _build_card_buttons() -> void:
 	UIStyle.apply_button_style(sell_button, UIStyle.ACCENT_RED.darkened(0.25), 30, 22)
 	unit_card.add_child(sell_button)
 
-	var caption := Label.new()
-	caption.text = "SELL"
-	caption.position = sell_button.position + Vector2(0.0, 10.0)
-	caption.size = Vector2(CARD_SELL_W, 28.0)
-	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	caption.add_theme_font_size_override("font_size", 24)
-	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_body_text(caption, UIStyle.TEXT_LIGHT)
-	unit_card.add_child(caption)
+	sell_caption = Label.new()
+	sell_caption.text = "SELL"
+	sell_caption.position = sell_button.position + Vector2(0.0, 10.0)
+	sell_caption.size = Vector2(CARD_SELL_W, 28.0)
+	sell_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sell_caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	sell_caption.add_theme_font_size_override("font_size", 24)
+	sell_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_body_text(sell_caption, UIStyle.TEXT_LIGHT)
+	unit_card.add_child(sell_caption)
 
 	# Coin and number as one centred group, so a 1 and a 20 both sit in the
 	# middle of the button instead of the number wandering as the price grows.
@@ -1835,6 +2178,7 @@ func _build_card_buttons() -> void:
 	row.add_theme_constant_override("separation", 8)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	unit_card.add_child(row)
+	sell_price_row = row
 
 	var coin_tex: Texture2D = UIStyle.icon_texture("icon_coin")
 	if coin_tex != null:
@@ -1856,8 +2200,28 @@ func _build_card_buttons() -> void:
 	UIStyle.apply_heading(sell_price_label, UIStyle.ACCENT_GOLD, 6)
 	row.add_child(sell_price_label)
 
-	var ability_x: float = CARD_PAD + CARD_SELL_W + CARD_BTN_GAP
-	var ability_w: float = inner - CARD_SELL_W - CARD_BTN_GAP
+	var recall_x: float = CARD_PAD + CARD_SELL_W + CARD_BTN_GAP
+	recall_button = Button.new()
+	recall_button.text = ""
+	recall_button.position = Vector2(recall_x, CARD_BTN_Y)
+	recall_button.size = Vector2(CARD_RECALL_W, CARD_BTN_H)
+	recall_button.pressed.connect(_on_recall_pressed)
+	UIStyle.apply_button_style(recall_button, UIStyle.ACCENT_TEAL.darkened(0.15), 30, 22)
+	unit_card.add_child(recall_button)
+
+	recall_caption = Label.new()
+	recall_caption.text = "RECALL"
+	recall_caption.position = recall_button.position
+	recall_caption.size = Vector2(CARD_RECALL_W, CARD_BTN_H)
+	recall_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	recall_caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	recall_caption.add_theme_font_size_override("font_size", 24)
+	recall_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_body_text(recall_caption, UIStyle.TEXT_LIGHT)
+	unit_card.add_child(recall_caption)
+
+	var ability_x: float = recall_x + CARD_RECALL_W + CARD_BTN_GAP
+	var ability_w: float = inner - CARD_SELL_W - CARD_RECALL_W - CARD_BTN_GAP * 2.0
 
 	ability_button = Button.new()
 	ability_button.text = ""
@@ -1887,6 +2251,20 @@ func _build_card_buttons() -> void:
 	ability_state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UIStyle.apply_body_text(ability_state_label, UIStyle.TEXT_MUTED)
 	unit_card.add_child(ability_state_label)
+
+	# Laid across the whole row the three buttons occupy, and shown only when
+	# they are all hidden -- see _refresh_card_actions.
+	hero_note = Label.new()
+	hero_note.position = Vector2(CARD_PAD, CARD_BTN_Y)
+	hero_note.size = Vector2(inner, CARD_BTN_H)
+	hero_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hero_note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hero_note.autowrap_mode = TextServer.AUTOWRAP_WORD
+	hero_note.add_theme_font_size_override("font_size", 25)
+	hero_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hero_note.visible = false
+	UIStyle.apply_body_text(hero_note, UIStyle.ACCENT_GOLD)
+	unit_card.add_child(hero_note)
 
 # Everything on the card that can change while it is open, which is nearly all
 # of it. Called once when the card opens and once a frame after that.
@@ -1921,7 +2299,45 @@ func _refresh_unit_card() -> void:
 	card_stat_values["hp"].text = "%d/%d" % [clampi(int(ceil(d.hp)), 0, shown_max), shown_max]
 
 	sell_price_label.text = str(UnitDatabase.get_sell_price(d.unit_id))
+	_refresh_card_actions(d)
+
+# What the bottom of the card offers. Every merged unit gets the same three
+# buttons; a hero gets none of them and a line about what it does instead --
+# it was never bought, cannot be put back in a tray it never came out of, and
+# what it brings is a passive rather than a cast.
+func _refresh_card_actions(d: Defender) -> void:
+	var hero: bool = d.is_hero()
+	sell_button.visible = not hero
+	sell_caption.visible = not hero
+	sell_price_row.visible = not hero
+	recall_button.visible = not hero
+	recall_caption.visible = not hero
+	hero_note.visible = hero
+	if hero:
+		# A hero's cast has a button of its own over the shop and is not put on
+		# the card as well: one blow reachable from two places is one place too
+		# many to look during a wave. What the card says instead is what the
+		# passive does and where the cast stands, which is the part the player
+		# came here to read.
+		ability_button.visible = false
+		ability_name_label.visible = false
+		ability_state_label.visible = false
+		hero_note.text = _hero_note_text(d)
+		return
 	_refresh_ability_button(d)
+
+func _hero_note_text(d: Defender) -> String:
+	var passive: String = String(UnitDatabase.get_def(d.unit_id).get("desc", ""))
+	var spec: Dictionary = d.ability_def()
+	if spec.is_empty():
+		return passive
+	var name: String = String(spec.get("name", "ABILITY"))
+	if not d.ability_unlocked():
+		return "%s\n%s at level %d" % [passive, name, d.ability_level()]
+	var left: float = d.ability_cooldown_left()
+	if left > 0.0:
+		return "%s\n%s in %ds" % [passive, name, int(ceil(left))]
+	return "%s\n%s READY" % [passive, name]
 
 # Damage is the one stat that is routinely below ten, where a rounded figure
 # hides the whole difference between two levels.
@@ -1987,6 +2403,21 @@ func _on_unit_created(id: String, pos: Vector2) -> void:
 	var is_top_tier: bool = String(UnitDatabase.get_def(id).get("merge_into", "")) == ""
 	_play_merge_fx(pos, is_top_tier)
 
+	# What the merge is worth, in the two currencies a screen has: how hard it
+	# hits and what note it plays. Both climb with the tier that was made and
+	# with the streak it belongs to, so the twentieth wood merge of a run is a
+	# tick and reaching a paladin mid-combo is an event.
+	var level: int = int(UnitDatabase.get_def(id).get("level", 0))
+	var combo: int = MergeManager.combo_count()
+	var weight: float = float(level) + minf(6.0, float(maxi(0, combo - 1))) * 0.5
+	if is_top_tier:
+		Sfx.merge_top(level, combo)
+		_shake(6.0 + weight * 1.6, 0.34)
+		_hit_stop(0.055, 0.06)
+	else:
+		Sfx.merge(level, combo)
+		_shake(2.0 + weight * 1.5, 0.14 + weight * 0.02)
+
 func _play_merge_fx(pos: Vector2, critical: bool = false) -> void:
 	var fx := MergeEffect.new()
 	merge_layer.add_child(fx)
@@ -1997,9 +2428,7 @@ func _play_merge_fx(pos: Vector2, critical: bool = false) -> void:
 	fx.play(critical)
 
 func _flash_screen() -> void:
-	if screen_flash == null:
-		return
-	if pause_menu != null and not pause_menu.screen_fx_enabled:
+	if screen_flash == null or not _screen_fx_on():
 		return
 	screen_flash.color = Color(1.0, 0.88, 0.55, 0.24)
 	var tw := create_tween()
@@ -2096,6 +2525,7 @@ func _build_ui() -> void:
 
 	_build_upgrade_panel(root)
 	_build_merge_upgrade_panel(root)
+	_build_blessing_panel(root)
 	_build_coin_chip(root)
 	_build_units_chip(root)
 	_build_winter_banner(root)
@@ -2292,6 +2722,56 @@ func _build_shop(root: Control) -> void:
 	shop_button.add_child(wash)
 	shop_button.button_down.connect(func() -> void: wash.color = Color(1, 1, 1, 0.18))
 	shop_button.button_up.connect(func() -> void: wash.color = Color(1, 1, 1, 0.0))
+
+	_build_hero_button(root, btn_pos, btn_size)
+
+# ------------------------------------------------------------ hero ability
+#
+# Directly over the shop plate and hard against the same right margin, so the
+# two read as one column of things the player reaches for mid-wave rather than
+# as a button that wandered in. It is the only control on the screen that is
+# there for the whole run whether it can be used or not: dark until the hero
+# earns it, then lit, and that changeover is most of how the player finds out
+# the ability exists at all.
+const HERO_BTN_SIZE := 150.0
+const HERO_BTN_GAP := 18.0
+
+func _build_hero_button(root: Control, shop_pos: Vector2, shop_size: Vector2) -> void:
+	hero_button = HeroAbilityButton.new()
+	root.add_child(hero_button)
+	hero_button.build(HERO_BTN_SIZE)
+	hero_button.position = Vector2(
+		shop_pos.x + shop_size.x - HERO_BTN_SIZE,
+		shop_pos.y - HERO_BTN_SIZE - HERO_BTN_GAP)
+	hero_button.cast_requested.connect(_on_hero_ability_pressed)
+
+# Whether the screen is the player's to press things on. Set by
+# _update_pause_button, which already knows about every overlay there is.
+var _hero_button_allowed: bool = true
+
+func _update_hero_button() -> void:
+	if hero_button == null:
+		return
+	if not _hero_button_allowed:
+		hero_button.visible = false
+		return
+	hero_button.refresh(_live_hero())
+
+func _on_hero_ability_pressed() -> void:
+	if not GameManager.is_playing() or get_tree().paused:
+		return
+	var d: Defender = _live_hero()
+	if d == null:
+		return
+	if CombatManager.cast_ability(d):
+		_shake(6.0, 0.2)
+
+# The hero if it is still standing, and null if it is not -- a hero can be cut
+# down like anything else, and when it is the button goes with it.
+func _live_hero() -> Defender:
+	if hero_unit != null and (not is_instance_valid(hero_unit) or not hero_unit.is_alive()):
+		hero_unit = null
+	return hero_unit
 
 func _open_shop() -> void:
 	if not GameManager.is_playing() or get_tree().paused:
@@ -2628,7 +3108,7 @@ func _format_coins(value: int) -> String:
 # ----------------------------------------------------------------- pause menu
 
 const PAUSE_BTN_SIZE := 96.0
-const PAUSE_ICON_SIZE := 52.0
+const PAUSE_ART := "res://art/pause_button.png"
 
 func _build_pause_ui(root: Control) -> void:
 	# Added after the upgrade panel so the overlay covers it, and the button
@@ -2638,31 +3118,40 @@ func _build_pause_ui(root: Control) -> void:
 	pause_menu.build(Vector2(VIEW_W, VIEW_H))
 	pause_menu.resume_requested.connect(_resume_from_pause)
 	pause_menu.restart_requested.connect(_restart_from_pause)
+	pause_menu.exit_requested.connect(_exit_to_menu)
 
 	# Tucked under the HUD card on the right, clear of the fortress and of the
-	# four lanes the enemies walk in on.
+	# four lanes the enemies walk in on. The frame is already painted into
+	# pause_button.png, so the button is invisible and the picture is the
+	# whole of what is drawn -- the same shape as every other painted button
+	# in this game.
 	pause_button = Button.new()
 	pause_button.text = ""
 	pause_button.size = Vector2(PAUSE_BTN_SIZE, PAUSE_BTN_SIZE)
 	pause_button.position = Vector2(VIEW_W - 24.0 - PAUSE_BTN_SIZE, 190.0)
 	pause_button.process_mode = Node.PROCESS_MODE_ALWAYS
 	pause_button.pressed.connect(_on_pause_pressed)
-	UIStyle.apply_button_style(pause_button, UIStyle.ACCENT_BLUE, 40, 24)
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		pause_button.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 	root.add_child(pause_button)
 
-	var icon_tex: Texture2D = UIStyle.icon_texture("icon_pause")
-	if icon_tex != null:
-		var icon := TextureRect.new()
-		icon.texture = icon_tex
-		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_SCALE
-		icon.size = Vector2(PAUSE_ICON_SIZE, PAUSE_ICON_SIZE)
-		icon.position = Vector2.ONE * ((PAUSE_BTN_SIZE - PAUSE_ICON_SIZE) / 2.0)
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		pause_button.add_child(icon)
-	else:
-		pause_button.text = "II"
+	var art := TextureRect.new()
+	art.texture = load(PAUSE_ART)
+	art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_SCALE
+	art.set_anchors_preset(Control.PRESET_FULL_RECT)
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_button.add_child(art)
+
+	# The painted plate cannot light up on its own, so a wash sits over it.
+	var wash := ColorRect.new()
+	wash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	wash.color = Color(1, 1, 1, 0)
+	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_button.add_child(wash)
+	pause_button.button_down.connect(func() -> void: wash.color = Color(1, 1, 1, 0.18))
+	pause_button.button_up.connect(func() -> void: wash.color = Color(1, 1, 1, 0.0))
 
 func _on_pause_pressed() -> void:
 	if not GameManager.is_playing() or get_tree().paused:
@@ -2682,6 +3171,37 @@ func _restart_from_pause() -> void:
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
+const MENU_SCENE := "res://scenes/menu/Menu.tscn"
+
+# Leaving a run on purpose. RESTART throws the run away and starts another --
+# it is a do-over, and a do-over should not pay out. EXIT is the player saying
+# they are finished, which is the same thing the defeat screen says, so it
+# banks what the run earned on the way out. Otherwise the only way to keep the
+# essence from a run you have had enough of would be to stand still and let
+# the fortress fall, which is a rule nobody should have to learn.
+#
+# The tree is unpaused before the scene changes, or the menu loads frozen and
+# nothing on it answers.
+func _exit_to_menu() -> void:
+	pause_menu.close()
+	get_tree().paused = false
+	# The track outlives the scene; without this a run abandoned mid-overflow
+	# leaves the menu playing at the panic volume it was raised to.
+	MusicPlayer.set_intensity(0.0)
+	_bank_run()
+	get_tree().change_scene_to_file(MENU_SCENE)
+
+# What the run is worth to the player once it is over, paid exactly once. Both
+# ways out of a run come through here, so a run can never be banked twice --
+# and the essence the defeat screen shows is the same figure this returns.
+var _run_banked: bool = false
+
+func _bank_run() -> int:
+	if _run_banked:
+		return 0
+	_run_banked = true
+	return MetaManager.record_run_end(WaveManager.current_wave, _beat_dragon)
+
 # The button only makes sense during play: the upgrade screen and game over
 # already own the whole screen and pause the tree themselves.
 func _update_pause_button() -> void:
@@ -2691,6 +3211,10 @@ func _update_pause_button() -> void:
 	pause_button.visible = GameManager.is_playing() and not overlay_open
 	if shop_button != null:
 		shop_button.visible = GameManager.is_playing() and not overlay_open
+	# Left to _update_hero_button to decide whether it has anything to show; all
+	# this settles is whether the screen belongs to something else.
+	_hero_button_allowed = GameManager.is_playing() and not overlay_open
+	_update_hero_button()
 
 func _on_game_state_changed(_new_state: int) -> void:
 	# The upgrade cards and the defeat plate both take the screen without going
@@ -2698,6 +3222,99 @@ func _on_game_state_changed(_new_state: int) -> void:
 	if not GameManager.is_playing():
 		_release_field_touch()
 	_update_pause_button()
+
+# --------------------------------------------------------------- blessings
+#
+# Shown once, before the tray drops anything, and never again this run --
+# the same shape as the upgrade panel (dim, title, a stack of cards) rather
+# than a new visual language, because this is also a screen the player picks
+# one card out of and moves on from.
+
+var blessing_panel: Control
+var blessing_cards: Array = []
+var blessing_card_ids: Array = []
+
+const BLESSING_CARD_H := 250.0
+const BLESSING_CARD_TOP := 320.0
+const BLESSING_CARD_SPACING := 26.0
+const BLESSING_MAX_CARDS := 4
+
+func _build_blessing_panel(root: Control) -> void:
+	blessing_panel = Control.new()
+	blessing_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	blessing_panel.visible = false
+	blessing_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	root.add_child(blessing_panel)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.82)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	blessing_panel.add_child(dim)
+
+	var title := Label.new()
+	title.text = "CHOOSE A BLESSING"
+	title.add_theme_font_size_override("font_size", 46)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position = Vector2(40, 190)
+	title.size = Vector2(VIEW_W - 80, 70)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(title, UIStyle.ACCENT_TEAL)
+	blessing_panel.add_child(title)
+
+	blessing_cards = []
+	blessing_card_ids = []
+	for i in range(BLESSING_MAX_CARDS):
+		var card := Button.new()
+		card.size = Vector2(VIEW_W - 120, BLESSING_CARD_H)
+		card.position = Vector2(60, BLESSING_CARD_TOP + i * (BLESSING_CARD_H + BLESSING_CARD_SPACING))
+		card.add_theme_font_size_override("font_size", 28)
+		card.pressed.connect(_on_blessing_card_pressed.bind(i))
+		UIStyle.apply_card_style(card, UIStyle.ACCENT_TEAL)
+		blessing_panel.add_child(card)
+		blessing_cards.append(card)
+		blessing_card_ids.append("")
+
+# A random sample rather than the whole pool every time, the same way the
+# upgrade screen never shows every upgrade at once -- three ordinarily, four
+# once MetaManager.has_tier4() has made a fourth slot worth having.
+func _show_blessing_selection() -> void:
+	var pool: Array = BlessingManager.choices()
+	pool.shuffle()
+	var card_count: int = 4 if MetaManager.has_tier4() else 3
+	var offered: Array = pool.slice(0, mini(card_count, pool.size()))
+
+	for i in range(blessing_cards.size()):
+		var card: Button = blessing_cards[i]
+		if i < offered.size():
+			var id: String = offered[i]
+			var d: Dictionary = BlessingManager.get_def(id)
+			card.text = "%s %s\n\n%s" % [d.get("icon", ""), d.get("name", ""), d.get("desc", "")]
+			card.visible = true
+			blessing_card_ids[i] = id
+		else:
+			card.visible = false
+			blessing_card_ids[i] = ""
+
+	blessing_panel.visible = true
+	get_tree().paused = true
+
+func _on_blessing_card_pressed(index: int) -> void:
+	var id: String = blessing_card_ids[index]
+	if id == "":
+		return
+	BlessingManager.apply(id)
+
+	var card: Button = blessing_cards[index]
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(card, "scale", Vector2(1.05, 1.05), 0.12)
+	tw.tween_callback(func() -> void:
+		card.scale = Vector2.ONE
+		blessing_panel.visible = false
+		get_tree().paused = false
+		_begin_run()
+	)
 
 func _build_upgrade_panel(root: Control) -> void:
 	upgrade_panel = Control.new()
@@ -2726,7 +3343,11 @@ func _build_upgrade_panel(root: Control) -> void:
 	var card_h := 300.0
 	var spacing := 40.0
 	var top := 420.0
-	for i in range(UPGRADE_CHOICES):
+	# Always built to the ceiling (a fourth seat bought once, permanently,
+	# from the menu shop) and shown down to whatever the run actually has --
+	# the same "build the max, hide down to the real count" shape the
+	# blessing panel already uses.
+	for i in range(UPGRADE_CARD_SLOTS):
 		var card := Button.new()
 		card.size = Vector2(VIEW_W - 120, card_h)
 		card.position = Vector2(60, top + i * (card_h + spacing))
@@ -2739,21 +3360,21 @@ func _build_upgrade_panel(root: Control) -> void:
 # ------------------------------------------------------- merge upgrade screen
 #
 # The one wave that pays out in a change to the board rather than a number, so
-# it is announced rather than chosen: the title lands with a flash, then the
-# three materials turn over one after another, each on its own merge burst.
+# it is announced rather than chosen. One painted plate (art/merge_upgrade.png)
+# carries the title, both lines of every row and the CONTINUE plate already
+# drawn in -- the same "picture plus an invisible hit box" shape the shop
+# shelf and the defeat screen use -- so all this owns is the reveal and where
+# CONTINUE actually is.
 
-const MERGE_UP_ROWS := [
-	{"from": "wood", "to": "gold"},
-	{"from": "bow", "to": "emerald"},
-	{"from": "crystal", "to": "totem"},
-]
-const MERGE_UP_ICON := 96.0
-const MERGE_UP_ROW_TOP := 620.0
-const MERGE_UP_ROW_GAP := 210.0
+const MERGE_UPGRADE_ART := "res://art/merge_upgrade.png"
+const MERGE_UPGRADE_ART_SIZE := Vector2(1122.0, 1402.0)
+const MERGE_UPGRADE_WIDTH := 1000.0
+# Where the painted CONTINUE plate sits, as a fraction of the art -- measured
+# off the picture the same way every other painted hit box in this game is.
+const MERGE_UPGRADE_CONTINUE_RECT := Rect2(0.240, 0.849, 0.516, 0.095)
 
 var merge_upgrade_panel: Control
-var merge_upgrade_title: Label
-var merge_upgrade_rows: Array = []      # [{ "wrap": Control, "at": Vector2 }]
+var merge_upgrade_plate: TextureRect
 
 func _build_merge_upgrade_panel(root: Control) -> void:
 	merge_upgrade_panel = Control.new()
@@ -2768,92 +3389,38 @@ func _build_merge_upgrade_panel(root: Control) -> void:
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	merge_upgrade_panel.add_child(dim)
 
-	merge_upgrade_title = Label.new()
-	merge_upgrade_title.text = "MERGE UPGRADE"
-	merge_upgrade_title.add_theme_font_size_override("font_size", 88)
-	merge_upgrade_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	merge_upgrade_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	merge_upgrade_title.position = Vector2(0, 300)
-	merge_upgrade_title.size = Vector2(VIEW_W, 140)
-	merge_upgrade_title.pivot_offset = Vector2(VIEW_W, 140) / 2.0
-	merge_upgrade_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_heading(merge_upgrade_title, UIStyle.ACCENT_GOLD, 14)
-	merge_upgrade_panel.add_child(merge_upgrade_title)
+	var plate_size := Vector2(MERGE_UPGRADE_WIDTH,
+		MERGE_UPGRADE_WIDTH * MERGE_UPGRADE_ART_SIZE.y / MERGE_UPGRADE_ART_SIZE.x)
+	var plate_pos := Vector2((VIEW_W - plate_size.x) / 2.0, (VIEW_H - plate_size.y) / 2.0)
 
-	var sub := Label.new()
-	sub.text = "THE TRAY IS REFORGED"
-	sub.add_theme_font_size_override("font_size", 34)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.position = Vector2(0, 452)
-	sub.size = Vector2(VIEW_W, 60)
-	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_body_text(sub, UIStyle.TEXT_MUTED)
-	merge_upgrade_panel.add_child(sub)
-
-	merge_upgrade_rows = []
-	for i in range(MERGE_UP_ROWS.size()):
-		merge_upgrade_rows.append(
-			_build_merge_upgrade_row(MERGE_UP_ROWS[i], MERGE_UP_ROW_TOP + i * MERGE_UP_ROW_GAP))
+	merge_upgrade_plate = TextureRect.new()
+	merge_upgrade_plate.texture = load(MERGE_UPGRADE_ART)
+	merge_upgrade_plate.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	merge_upgrade_plate.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	merge_upgrade_plate.stretch_mode = TextureRect.STRETCH_SCALE
+	merge_upgrade_plate.position = plate_pos
+	merge_upgrade_plate.size = plate_size
+	merge_upgrade_plate.pivot_offset = plate_size / 2.0
+	merge_upgrade_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	merge_upgrade_panel.add_child(merge_upgrade_plate)
 
 	var go := Button.new()
-	go.text = "CONTINUE"
-	go.size = Vector2(460, 120)
-	go.position = Vector2((VIEW_W - 460) / 2.0, MERGE_UP_ROW_TOP + 3 * MERGE_UP_ROW_GAP + 60.0)
+	go.text = ""
+	go.position = plate_pos + MERGE_UPGRADE_CONTINUE_RECT.position * plate_size
+	go.size = MERGE_UPGRADE_CONTINUE_RECT.size * plate_size
 	go.pressed.connect(_close_merge_upgrade)
-	UIStyle.apply_button_style(go, UIStyle.ACCENT_GOLD, 44, 30)
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		go.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 	merge_upgrade_panel.add_child(go)
 
-func _build_merge_upgrade_row(spec: Dictionary, y: float) -> Dictionary:
-	var wrap := Control.new()
-	wrap.position = Vector2(0, y)
-	wrap.size = Vector2(VIEW_W, MERGE_UP_ICON + 40.0)
-	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	merge_upgrade_panel.add_child(wrap)
-
-	var mid := VIEW_W / 2.0
-	_merge_upgrade_icon(wrap, String(spec["from"]), Vector2(mid - 250.0, 0), 0.55)
-
-	var arrow := Label.new()
-	arrow.text = "→"
-	arrow.add_theme_font_size_override("font_size", 60)
-	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	arrow.position = Vector2(mid - 90.0, 0)
-	arrow.size = Vector2(180, MERGE_UP_ICON)
-	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_body_text(arrow, UIStyle.TEXT_MUTED)
-	wrap.add_child(arrow)
-
-	var to_id: String = String(spec["to"])
-	_merge_upgrade_icon(wrap, to_id, Vector2(mid + 90.0, -14.0), 1.0)
-
-	var name_label := Label.new()
-	name_label.text = String(UnitDatabase.get_def(to_id).get("name", ""))
-	name_label.add_theme_font_size_override("font_size", 30)
-	name_label.position = Vector2(mid + 90.0 + MERGE_UP_ICON + 24.0, 0)
-	name_label.size = Vector2(300, MERGE_UP_ICON)
-	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_heading(name_label, UIStyle.ACCENT_TEAL, 5)
-	wrap.add_child(name_label)
-
-	# Where the burst goes off when this row turns over.
-	return {"wrap": wrap, "at": Vector2(mid + 90.0 + MERGE_UP_ICON * 0.5, y + MERGE_UP_ICON * 0.5)}
-
-func _merge_upgrade_icon(parent: Control, id: String, at: Vector2, alpha: float) -> void:
-	var path := UnitDatabase.get_art_path(id)
-	if path == "":
-		return
-	var icon := TextureRect.new()
-	icon.texture = load(path)
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.size = Vector2(MERGE_UP_ICON, MERGE_UP_ICON)
-	icon.position = at
-	icon.modulate = UnitDatabase.get_art_tint(id) * Color(1, 1, 1, alpha)
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(icon)
+	# The painted plate cannot light up on its own, so a wash sits over it.
+	var wash := ColorRect.new()
+	wash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	wash.color = Color(1, 0.9, 0.6, 0)
+	wash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	go.add_child(wash)
+	go.button_down.connect(func() -> void: wash.color = Color(1, 0.9, 0.6, 0.18))
+	go.button_up.connect(func() -> void: wash.color = Color(1, 0.9, 0.6, 0.0))
 
 func _show_merge_upgrade() -> void:
 	GameManager.merge_upgraded = true
@@ -2862,33 +3429,14 @@ func _show_merge_upgrade() -> void:
 	get_tree().paused = true
 
 	_flash_screen()
-	merge_upgrade_title.scale = Vector2(0.55, 0.55)
-	merge_upgrade_title.modulate.a = 0.0
+	merge_upgrade_plate.scale = Vector2(0.8, 0.8)
+	merge_upgrade_plate.modulate.a = 0.0
 
 	var tw := create_tween()
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tw.tween_property(merge_upgrade_title, "modulate:a", 1.0, 0.18)
-	tw.parallel().tween_property(merge_upgrade_title, "scale", Vector2.ONE, 0.42) \
+	tw.tween_property(merge_upgrade_plate, "modulate:a", 1.0, 0.22)
+	tw.parallel().tween_property(merge_upgrade_plate, "scale", Vector2.ONE, 0.45) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
-	# One row at a time, each landing on its own burst.
-	for i in range(merge_upgrade_rows.size()):
-		var row: Dictionary = merge_upgrade_rows[i]
-		var wrap: Control = row["wrap"]
-		wrap.modulate.a = 0.0
-		var home: float = wrap.position.y
-		wrap.position.y = home + 40.0
-		tw.tween_interval(0.16)
-		tw.tween_property(wrap, "modulate:a", 1.0, 0.2)
-		tw.parallel().tween_property(wrap, "position:y", home, 0.32) \
-			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.parallel().tween_callback(_burst_at.bind(row["at"], i == merge_upgrade_rows.size() - 1))
-
-func _burst_at(at: Vector2, critical: bool) -> void:
-	var fx := MergeEffect.new()
-	ui_layer.add_child(fx)
-	fx.position = at
-	fx.play(critical)
 
 func _close_merge_upgrade() -> void:
 	merge_upgrade_panel.visible = false
@@ -3141,6 +3689,19 @@ func _build_defeat_panel(root: Control) -> void:
 	restart.button_down.connect(func() -> void: wash.color = Color(1, 0.5, 0.4, 0.18))
 	restart.button_up.connect(func() -> void: wash.color = Color(1, 0.5, 0.4, 0.0))
 
+	# Essence is MetaManager's, not the painting's -- there was never a line in
+	# the art for it, so it floats in the clear band below the plate rather
+	# than pretending to be part of what was drawn.
+	essence_label = Label.new()
+	essence_label.position = Vector2(0, art_pos.y + art_size.y + 18.0)
+	essence_label.size = Vector2(VIEW_W, 60.0)
+	essence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	essence_label.add_theme_font_size_override("font_size", 34)
+	essence_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(essence_label, UIStyle.ACCENT_TEAL, 6)
+	essence_label.modulate.a = 0.0
+	game_over_panel.add_child(essence_label)
+
 # Drops in rather than appearing: the plate falls the last of the way and
 # settles, which is the difference between a defeat screen and a dialog box.
 func _show_defeat_panel() -> void:
@@ -3155,11 +3716,23 @@ func _show_defeat_panel() -> void:
 	tw.tween_property(defeat_plate, "modulate:a", 1.0, 0.22)
 	tw.parallel().tween_property(defeat_plate, "position:y", home, 0.45) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if essence_label != null:
+		var etw := create_tween()
+		etw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		etw.tween_interval(0.3)
+		etw.tween_property(essence_label, "modulate:a", 1.0, 0.3)
 
 func _on_fortress_hp_changed(current: float, max_hp: float) -> void:
 	_update_hearts(current, max_hp)
+	if _last_fortress_hp >= 0.0 and current < _last_fortress_hp:
+		_clean_streak = 0
+	_last_fortress_hp = current
 
 func _on_fortress_died() -> void:
+	_shake(18.0, 0.5)
+	var gained: int = _bank_run()
+	if essence_label != null:
+		essence_label.text = "+%d ESSENCE" % gained
 	GameManager.trigger_game_over()
 	_show_defeat_panel()
 
@@ -3202,6 +3775,24 @@ func _on_wave_started(wave_number: int) -> void:
 	tw.tween_interval(0.6)
 	tw.tween_property(wave_banner_wrap, "modulate:a", 0.0, 0.4)
 
+	_show_modifier_banner(WaveManager.modifier_for(wave_number))
+
+# The name of whatever twist WaveManager put on this wave, held up just long
+# enough to be read before the fight starts -- "" plays it silent, which is
+# every ordinary wave.
+func _show_modifier_banner(modifier_id: String) -> void:
+	if modifier_banner == null or modifier_id == "":
+		return
+	modifier_banner.text = WaveManager.modifier_name(modifier_id)
+	modifier_banner.modulate.a = 0.0
+	modifier_banner.scale = Vector2(0.8, 0.8)
+	var tw2 := create_tween()
+	tw2.tween_property(modifier_banner, "modulate:a", 1.0, 0.18)
+	tw2.parallel().tween_property(modifier_banner, "scale", Vector2.ONE, 0.22) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw2.tween_interval(0.9)
+	tw2.tween_property(modifier_banner, "modulate:a", 0.0, 0.4)
+
 # Takes the plate off the screen and stops whatever was animating it. Kept as
 # one call because a plate that is merely transparent is still being tweened,
 # and the next thing to fade it up would be fighting a tween that is fading it
@@ -3215,8 +3806,25 @@ func _hide_wave_banner() -> void:
 
 # ------------------------------------------------------------------ upgrades
 
+# Waves cleared with the fortress untouched, back to back. Avoiding the
+# overflow line or taking a hit and still holding is its own reward already;
+# this is the one on top for the run that never had to cash either in.
+const CLEAN_STREAK_MILESTONES := [3, 5, 10, 15, 20, 25, 30]
+
+func _is_clean_streak_milestone(streak: int) -> bool:
+	return CLEAN_STREAK_MILESTONES.has(streak) or (streak > 30 and streak % 10 == 0)
+
 func _on_wave_cleared(wave_number: int) -> void:
 	fortress.set_level(1 + wave_number / 10)
+	if fortress != null and fortress.hp >= fortress.max_hp:
+		_clean_streak += 1
+		MetaManager.record_clean_streak(_clean_streak)
+		if _is_clean_streak_milestone(_clean_streak):
+			_pay_out(20 + wave_number * 2, fortress.global_position)
+		if WaveManager.modifier_for(wave_number) == "brutal":
+			MetaManager.grant_achievement("storm_weathered")
+	if wave_number == WaveManager.WINTER_WAVE and _run_start_ms > 0:
+		MetaManager.record_wave30_time((Time.get_ticks_msec() - _run_start_ms) / 1000.0)
 	# The golem's wave pays out like any other tenth, but the changeover is the
 	# reward the player actually came for, so it goes first and hands over to the
 	# upgrade screen when it is done.
@@ -3235,16 +3843,20 @@ func _show_upgrade_selection() -> void:
 	if WaveManager.current_wave == MERGE_UPGRADE_WAVE:
 		_show_merge_upgrade()
 		return
-	var choices: Array = UpgradeManager.get_random_choices(UPGRADE_CHOICES)
+	var choice_count: int = UPGRADE_CARD_SLOTS if MetaManager.fourth_card_unlocked else UPGRADE_CHOICES
+	var choices: Array = UpgradeManager.get_random_choices(choice_count)
 	for i in range(upgrade_cards.size()):
 		var card: Button = upgrade_cards[i]
 		if i < choices.size():
 			var id: String = choices[i]
 			var d: Dictionary = UpgradeManager.get_def(id)
 			var level: int = UpgradeManager.get_level(id)
-			card.text = "%s %s\nLv %d -> %d\n%s" % [d.get("icon", ""), d.get("name", ""), level, level + 1, d.get("desc", "")]
+			var is_rare: bool = String(d.get("rarity", "common")) == "rare"
+			var name_line: String = ("✦ RARE ✦\n" if is_rare else "") + "%s %s" % [d.get("icon", ""), d.get("name", "")]
+			card.text = "%s\nLv %d -> %d\n%s" % [name_line, level, level + 1, d.get("desc", "")]
 			card.visible = true
-			UIStyle.apply_card_style(card, UIStyle.category_color(d.get("category", "general")))
+			var accent: Color = UIStyle.ACCENT_GOLD if is_rare else UIStyle.category_color(d.get("category", "general"))
+			UIStyle.apply_card_style(card, accent)
 			upgrade_card_ids[i] = id
 		else:
 			card.visible = false

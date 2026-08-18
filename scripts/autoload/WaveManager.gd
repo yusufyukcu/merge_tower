@@ -50,7 +50,7 @@ func _begin_next_wave() -> void:
 # every thirty. The dragon's fifty is not a multiple of anything -- it is where
 # it was asked for -- so the two live side by side rather than one being bent
 # into the other's shape.
-const BOSS_SCHEDULE := {30: "stone_golem", 50: "ice_dragon"}
+const BOSS_SCHEDULE := {30: "stone_golem", 40: "frost_troll", 50: "ice_dragon"}
 
 func is_boss_wave(wave: int) -> bool:
 	if BOSS_SCHEDULE.has(wave):
@@ -69,11 +69,33 @@ func is_boss_wave(wave: int) -> bool:
 # having to be touched again -- and until the first of them existed, the game
 # simply kept playing with the old roster.
 const WINTER_WAVE := 30
-const WINTER_POOL := ["ice_wolf", "ice_soldier", "ice_wizard"]
 const WINTER_BOSS := "ice_dragon"
+# A mid-boss the far side of the changeover, so winter is not fifty waves on
+# one boss and its own reskinned roster. Same slam a stone golem throws --
+# CombatManager reads `is_boss` and nothing else to know a body wants one --
+# so this is a stat line and a name, not new combat code.
+const WINTER_MIDBOSS := "frost_troll"
 
 func is_winter(wave: int) -> bool:
 	return wave > WINTER_WAVE
+
+# The winter roster comes in a body at a time rather than all three landing on
+# the same wave the map turns to snow -- the wolf is the first cold thing the
+# player fights, the skeleton and the wizard are things that had to wait for a
+# board that could take them. Ids the database has never heard of are filtered
+# out rather than spawned as nothing, so the rest can be added one creature at
+# a time without this having to be touched again.
+const WINTER_WOLF_WAVE := 31
+const WINTER_SOLDIER_WAVE := 35
+const WINTER_WIZARD_WAVE := 40
+
+func _winter_pool(wave: int) -> Array:
+	var ids: Array = ["ice_wolf"]
+	if wave >= WINTER_SOLDIER_WAVE:
+		ids.append("ice_soldier")
+	if wave >= WINTER_WIZARD_WAVE:
+		ids.append("ice_wizard")
+	return ids
 
 func _built(ids: Array) -> Array:
 	var out: Array = []
@@ -87,14 +109,18 @@ func _boss_for(wave: int) -> String:
 	if not named.is_empty():
 		return named[0]
 	if is_winter(wave):
-		var winter: Array = _built([WINTER_BOSS])
+		# Past the two scheduled winter bosses, the multiples of thirty
+		# alternate rather than repeating the dragon forever -- the boss
+		# changes with the wave the way the trash roster already does.
+		var pick: String = WINTER_MIDBOSS if (wave / 30) % 2 == 0 else WINTER_BOSS
+		var winter: Array = _built([pick, WINTER_BOSS, WINTER_MIDBOSS])
 		if not winter.is_empty():
 			return winter[0]
 	return "stone_golem"
 
 func _pool_for(wave: int) -> Array:
 	if is_winter(wave):
-		var winter: Array = _built(WINTER_POOL)
+		var winter: Array = _built(_winter_pool(wave))
 		if not winter.is_empty():
 			return winter
 
@@ -130,16 +156,46 @@ func wave_count(wave: int) -> int:
 	return mini(int(round(WAVE_BASE_COUNT * pow(WAVE_GROWTH, maxi(wave, 1) - 1))),
 		WAVE_MAX_COUNT)
 
+# ------------------------------------------------------------- wave modifiers
+#
+# A periodic twist on the standard mix rather than just more of it -- pure
+# multipliers on the count and the two scalars every enemy already reads
+# (Enemy.apply_wave_scaling), so a wave can feel like a rush or an elite pack
+# without a new enemy id, new art or any new code in Enemy/CombatManager.
+const MODIFIERS := {
+	"swarm": {"name": "SWARM", "count_mult": 1.8, "hp_mult": 0.6, "dmg_mult": 1.0},
+	"elite": {"name": "ELITE PACK", "count_mult": 0.6, "hp_mult": 1.6, "dmg_mult": 1.3},
+	"brutal": {"name": "BRUTAL", "count_mult": 1.0, "hp_mult": 1.15, "dmg_mult": 1.5},
+}
+const MODIFIER_CYCLE := ["swarm", "elite", "brutal"]
+const MODIFIER_EVERY := 7
+const MODIFIER_START := 4
+
+# The id of the modifier landing on this wave, or "" for an ordinary one.
+# Boss waves never carry one -- the boss is already the twist that wave gets.
+func modifier_for(wave: int) -> String:
+	if is_boss_wave(wave) or wave < MODIFIER_START:
+		return ""
+	if (wave - MODIFIER_START) % MODIFIER_EVERY != 0:
+		return ""
+	var idx: int = ((wave - MODIFIER_START) / MODIFIER_EVERY) % MODIFIER_CYCLE.size()
+	return MODIFIER_CYCLE[idx]
+
+func modifier_name(id: String) -> String:
+	return String(MODIFIERS.get(id, {}).get("name", ""))
+
 func _build_wave_def(wave: int) -> Dictionary:
 	var enemies: Array = []
 	var interval: float = 1.0
+	var mod_id: String = modifier_for(wave)
+	var mod: Dictionary = MODIFIERS.get(mod_id, {})
 
 	if is_boss_wave(wave):
 		enemies = [_boss_for(wave)]
 	else:
 		var pool: Array = _pool_for(wave)
 
-		var count: int = wave_count(wave)
+		var count: int = maxi(1, int(round(wave_count(wave) * float(mod.get("count_mult", 1.0)))))
 
 		for i in range(count):
 			enemies.append(pool[randi() % pool.size()])
@@ -159,11 +215,15 @@ func _build_wave_def(wave: int) -> Dictionary:
 		hp_scale = 1.0 + 49 * 0.055 + log(wave - 49) * 0.35
 		dmg_scale = 1.0 + 49 * 0.03 + log(wave - 49) * 0.2
 
+	hp_scale *= float(mod.get("hp_mult", 1.0))
+	dmg_scale *= float(mod.get("dmg_mult", 1.0))
+
 	return {
 		"enemies": enemies,
 		"spawn_interval": interval,
 		"hp_mult": hp_scale,
 		"damage_mult": dmg_scale,
+		"modifier": mod_id,
 	}
 
 func _process(delta: float) -> void:

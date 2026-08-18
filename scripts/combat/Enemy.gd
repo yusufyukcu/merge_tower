@@ -287,6 +287,198 @@ func tick_vine(delta: float) -> void:
 
 const POISON_INTERVAL := 0.5
 
+# The dartmaster's rot, which is a vine's poison without the vine: no hold on the
+# body, no creepers laid over it, just the bubbles and the ticking. Re-applied
+# rather than stacked, exactly as a vine is -- a second dart in the same body
+# renews the clock and keeps the stronger of the two rots.
+func apply_poison(seconds: float, dps: float, by: Defender = null) -> void:
+	if hp <= 0.0 or dps <= 0.0 or seconds <= 0.0:
+		return
+	poison_dps = maxf(poison_dps, dps)
+	poison_timer = maxf(poison_timer, seconds)
+	_vine_source = by
+	if _bind == null or not is_instance_valid(_bind):
+		_bind = VineBind.new()
+		add_child(_bind)
+		_bind.setup(_radius, false)
+	_bind.refresh(0.0, poison_timer)
+
+# ------------------------------------------------------------------- slowed
+#
+# What the void master's ball leaves on whatever it hits. It multiplies both
+# halves of what a body does with its time -- the ground it covers and the rate
+# it swings at -- so a slowed enemy is behind on the walk in and behind again
+# once it arrives, which is what makes one hero worth a slot on a lane he is not
+# even holding.
+#
+# Deepened rather than stacked: two balls into the same body take the slower of
+# the two and renew the clock, the same rule every other lasting effect here
+# follows.
+
+const SLOW_TINT := Color(0.62, 0.34, 1.0)
+const SLOW_AMOUNT := 0.5
+
+var slow_mult: float = 1.0
+var slow_timer: float = 0.0
+# Which colour the current slow paints with. A bolt carries its own -- the void
+# master's is violet and the cronomancer's is blue -- so the wash on the body
+# names what put it there instead of every slow in the game looking like the
+# first one that was written.
+var slow_tint: Color = SLOW_TINT
+
+func apply_slow(mult: float, seconds: float, tint: Color = SLOW_TINT) -> void:
+	if hp <= 0.0 or seconds <= 0.0 or mult >= 1.0:
+		return
+	slow_mult = minf(slow_mult, maxf(mult, 0.1))
+	slow_timer = maxf(slow_timer, seconds)
+	slow_tint = tint
+	_paint_slow()
+
+func is_slowed() -> bool:
+	return slow_timer > 0.0
+
+func tick_slow(delta: float) -> void:
+	if slow_timer <= 0.0:
+		return
+	slow_timer = maxf(0.0, slow_timer - delta)
+	if slow_timer > 0.0:
+		return
+	slow_mult = 1.0
+	_paint_slow()
+
+# ------------------------------------------------------------- the hour held
+#
+# The cronomancer's cast, kept in a slot of its own rather than deepening the
+# one above. Three reasons, all of them the same reason: it is a different
+# effect. It is not thrown at a body, it lands on every body at once; it carries
+# an hourglass over each of them that has to appear and leave with it exactly;
+# and an ordinary bolt landing on a held enemy must not be able to cut its clock
+# short by renewing the shared one underneath it.
+#
+# The two multiply. A body caught by the hour *and* hit by a bolt is slower than
+# either would leave it, which is the right answer -- and both are bounded well
+# above zero, so the product can never stop anything outright.
+
+const CHRONO_TINT := Color(0.38, 0.62, 1.0)
+const CHRONO_AMOUNT := 0.42
+
+var chrono_mult: float = 1.0
+var chrono_timer: float = 0.0
+var _chrono_mark: ChronoMark = null
+
+func apply_chrono(mult: float, seconds: float) -> void:
+	if hp <= 0.0 or seconds <= 0.0 or mult >= 1.0:
+		return
+	chrono_mult = minf(chrono_mult, maxf(mult, 0.1))
+	chrono_timer = maxf(chrono_timer, seconds)
+	if _chrono_mark == null or not is_instance_valid(_chrono_mark):
+		_chrono_mark = ChronoMark.new()
+		add_child(_chrono_mark)
+		_chrono_mark.setup(_radius)
+	_paint_slow()
+
+func is_chrono_held() -> bool:
+	return chrono_timer > 0.0
+
+func tick_chrono(delta: float) -> void:
+	if chrono_timer <= 0.0:
+		return
+	chrono_timer = maxf(0.0, chrono_timer - delta)
+	if chrono_timer > 0.0:
+		return
+	chrono_mult = 1.0
+	_release_chrono()
+	_paint_slow()
+
+func _release_chrono() -> void:
+	if _chrono_mark != null and is_instance_valid(_chrono_mark):
+		_chrono_mark.close()
+	_chrono_mark = null
+
+# How fast this body actually crosses ground right now, and how long it actually
+# waits between blows. Everything that moves or times an enemy goes through
+# these two rather than through `speed` and `attack_interval`.
+func _pace() -> float:
+	return slow_mult * chrono_mult
+
+func move_speed() -> float:
+	return speed * _pace()
+
+func effective_interval() -> float:
+	return attack_interval / maxf(_pace(), 0.1)
+
+# The same two lines in the body shader the freeze uses on our own soldiers --
+# a blend toward a colour that keeps the pixel's own brightness, so a slowed
+# goblin and a slowed golem read the same however they are painted.
+#
+# The hour wins the colour while it is open. It is the heavier of the two and
+# the one with an icon standing over the body announcing it, so the wash under
+# that icon had better be the one it belongs to.
+func _paint_slow() -> void:
+	if _lit == null:
+		return
+	if chrono_timer > 0.0:
+		_lit.set_shader_parameter("ice", CHRONO_TINT)
+		_lit.set_shader_parameter("ice_amount", CHRONO_AMOUNT)
+	elif slow_timer > 0.0:
+		_lit.set_shader_parameter("ice", slow_tint)
+		_lit.set_shader_parameter("ice_amount", SLOW_AMOUNT)
+	else:
+		_lit.set_shader_parameter("ice_amount", 0.0)
+
+# ---------------------------------------------------------------- knocked back
+#
+# The windmaster's gale. A body is thrown straight back out along the lane it
+# walked in on -- its angle never changes, only how far out it is standing -- so
+# a rank blown back is a rank that has to walk the ground again rather than one
+# scattered somewhere the lane rules cannot account for.
+#
+# Bosses do not move. That is the deal: everything else on the field can be held
+# off a wall for a few seconds and the thing the wave was actually about cannot.
+
+const KNOCK_SPEED := 700.0
+const KNOCK_MAX_RADIUS := 560.0
+
+var knock_left: float = 0.0
+
+func can_be_knocked() -> bool:
+	return not is_boss
+
+func knock_back(distance: float) -> void:
+	if hp <= 0.0 or distance <= 0.0 or not can_be_knocked():
+		return
+	knock_left = maxf(knock_left, distance)
+	var dust := FxUtil.burst(self, 9, 0.34, 90.0, 240.0,
+		Color(0.92, 1.0, 0.72, 1.0), Color(0.45, 0.60, 0.24, 0.0))
+	dust.position = Vector2(0, -_radius * 0.3)
+	dust.direction = -_forward()
+	dust.spread = 42.0
+	dust.gravity = Vector2(0, 240)
+	dust.emitting = true
+	# Taken off the body once it has burnt out. A soldier throws a handful of
+	# sparks in a whole run and can afford to leave the emitters lying about; a
+	# body the windmaster is holding off a lane is thrown back every second and
+	# a half for as long as it lives.
+	var life := dust.create_tween()
+	life.tween_interval(dust.lifetime + 0.2)
+	life.tween_callback(dust.queue_free)
+
+func is_knocked() -> bool:
+	return knock_left > 0.0
+
+# Answers with whether the body is still in the air, which is also what tells the
+# caller to skip its walk this frame. The position is set straight rather than
+# through update_position: that is what feeds the heading, and a body blown
+# backwards should still be facing the fortress it was walking toward.
+func tick_knock(delta: float, center: Vector2) -> bool:
+	if knock_left <= 0.0:
+		return false
+	var step: float = minf(knock_left, KNOCK_SPEED * delta)
+	knock_left -= step
+	current_radius = minf(current_radius + step, KNOCK_MAX_RADIUS)
+	global_position = center + Vector2(cos(angle), sin(angle)) * current_radius
+	return true
+
 var is_boss: bool = false
 var slam_interval: float = 0.0
 var slam_damage: float = 0.0
@@ -325,7 +517,7 @@ func cast_ready(delta: float) -> bool:
 	return _cast_timer <= 0.0
 
 func start_cast_cooldown() -> void:
-	_cast_timer = attack_interval
+	_cast_timer = effective_interval()
 
 var _attack_timer: float = 0.0
 
@@ -416,6 +608,10 @@ func _build_visual(d: Dictionary) -> void:
 	var radius: float = d.get("radius", 28.0)
 	_altitude = d.get("altitude", 0.0)
 	_build_frames()
+	# Pulls this body's remains into the cache now, on a frame that is already
+	# loading textures, rather than on the frame it dies -- which is the one
+	# frame of its life the player is watching closely.
+	Corpse.warm(enemy_id)
 	# A body with drawn frames stands in the first of them, so the pose it holds
 	# and the pose it attacks out of are the same drawing.
 	var art_path: String = ""
@@ -745,7 +941,10 @@ func _process(delta: float) -> void:
 	_amp = lerpf(_amp, want_amp, 1.0 - exp(-7.0 * delta))
 	_tempo = lerpf(_tempo, want_tempo, 1.0 - exp(-5.0 * delta))
 
-	_cycle += delta * float(_gait["speed"]) * _tempo * _rate
+	# The gait runs at whatever pace the body is actually keeping. Without this a
+	# slowed enemy crosses the ground at half speed while its legs go on working
+	# at full, which reads as ice underfoot rather than as a body held back.
+	_cycle += delta * float(_gait["speed"]) * _tempo * _rate * slow_mult
 
 	var bob: float
 	var squash: float
@@ -1241,6 +1440,7 @@ func take_damage(amount: float, from_position: Vector2 = Vector2.INF,
 	var final_amount: float = amount * (1.0 - damage_reduction)
 	hp = max(0.0, hp - final_amount)
 	_update_health_bar()
+	_show_damage(final_amount, poison)
 
 	# Points from the impact back toward whatever landed the blow, so the
 	# effect can sit on the struck side and throw sparks the other way.
@@ -1254,14 +1454,14 @@ func take_damage(amount: float, from_position: Vector2 = Vector2.INF,
 		set_process(false)
 		# Credited before the signal goes out: `died` is what takes this body out
 		# of every list it is in, and half of those handlers let go of it.
+		# The spot is carried along with the credit: a hero that marks its kills
+		# has to mark them where the body actually fell, and by the time the
+		# signal below has run there is nothing left to ask.
 		if by != null and is_instance_valid(by):
-			by.record_kill(UnitDatabase.get_enemy_xp(enemy_id))
+			by.record_kill(UnitDatabase.get_enemy_xp(enemy_id), global_position,
+				clampf(_radius / 32.0, 0.7, 1.8), enemy_id)
 		died.emit(self)
-		_spawn_death_fx()
-		var tw := create_tween()
-		tw.tween_property(self, "scale", Vector2.ZERO, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-		tw.parallel().tween_property(self, "modulate:a", 0.0, 0.25)
-		tw.tween_callback(queue_free)
+		_play_death()
 	elif poison:
 		# A tint rather than a wash: this fires twice a second for seconds on
 		# end, and a body that turns solid green every tick stops reading as a
@@ -1297,3 +1497,74 @@ func _spawn_death_fx() -> void:
 		return
 	var radius: float = UnitDatabase.get_enemy_def(enemy_id).get("radius", 28.0)
 	fx.play_enemy_death(clampf(radius / 28.0, 0.85, 2.2))
+
+# ------------------------------------------------------------------- the end
+#
+# Two ways out of a fight. A body with remains drawn for it comes apart where it
+# stood and leaves them lying on the floor for a few seconds -- see Corpse,
+# which owns everything about that. Everything without them keeps the dissolve
+# the game has always used, which today means the three bosses: nothing was ever
+# painted for what a stone golem or a dragon leaves behind, and a magical poof
+# is anyway the better answer for a thing made of rock.
+func _play_death() -> void:
+	if not Corpse.has_art(enemy_id):
+		_spawn_death_fx()
+		var tw := create_tween()
+		tw.tween_property(self, "scale", Vector2.ZERO, 0.25) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(self, "modulate:a", 0.0, 0.25)
+		tw.tween_callback(queue_free)
+		return
+
+	var host: Node2D = CombatManager.ground_layer
+	if host == null or not is_instance_valid(host):
+		host = get_parent()
+	if host != null:
+		var remains := Corpse.new()
+		host.add_child(remains)
+		# On the ground it was standing on rather than on the body: the sprite
+		# rides a bob above its own feet and a bat is drawn a good way further,
+		# and what is left of either of them falls to the floor.
+		remains.global_position = global_position + Vector2(0, -_radius * 0.12)
+		remains.play(enemy_id, _radius, _facing)
+	# Taken off the field on the same frame the pieces appear. queue_free only
+	# lands at the end of it, and one frame of a whole body standing inside its
+	# own remains is one frame too many.
+	hide()
+	queue_free()
+
+# ---------------------------------------------------------------- the number
+#
+# What the blow was worth, put up beside the body that took it. Everything that
+# hurts an enemy comes through take_damage, so this is the one place it is done.
+#
+# Merged rather than stacked. Several blows landing inside a fraction of a
+# second is not unusual -- a volley of arrows arriving together, an ability that
+# touches the whole field, the rot ticking away while a sword is working -- and
+# six numbers drawn on top of each other is six numbers nobody can read. A hit
+# that arrives while the last one is still climbing is added into it instead.
+var _dmg_num: DamageNumber = null
+
+func _show_damage(dealt: float, poison: bool) -> void:
+	if dealt < 0.5:
+		return
+	var host: Node2D = CombatManager.fx_layer
+	if host == null or not is_instance_valid(host):
+		host = get_parent()
+	if host == null:
+		return
+
+	var kind: int = DamageNumber.POISON if poison else DamageNumber.HIT
+	# How much of this particular body the blow took, which is what sizes the
+	# digits -- measured the same way the hit effect is, so a scratch on a boss
+	# and a scratch on a goblin both read as scratches.
+	var punch: float = clampf(dealt / maxf(max_hp * 0.20, 1.0), 0.0, 1.0)
+
+	if _dmg_num != null and is_instance_valid(_dmg_num) and _dmg_num.can_merge(kind):
+		_dmg_num.add(dealt, punch)
+		return
+
+	var num := DamageNumber.new()
+	host.add_child(num)
+	num.play(dealt, tap_point(), _radius, punch, kind)
+	_dmg_num = num

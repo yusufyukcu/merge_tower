@@ -18,6 +18,18 @@ const FADE_RATE := 26.0    # dB per second, for both the opening fade and duckin
 
 var _player: AudioStreamPlayer = null
 
+# How close to a bad moment the game currently is -- 0 for ordinary play, 1 at
+# the edge of an overflow loss. There is only the one track, so tension is
+# ridden rather than crossfaded to: louder and a shade higher as it climbs,
+# settled back the instant whatever raised it is over.
+var _intensity: float = 0.0
+const INTENSITY_VOLUME_DB := 4.0
+const INTENSITY_PITCH := 0.06
+const INTENSITY_RATE := 2.0
+
+func set_intensity(t: float) -> void:
+	_intensity = clampf(t, 0.0, 1.0)
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if not ResourceLoader.exists(TRACK):
@@ -48,7 +60,10 @@ func _process(delta: float) -> void:
 	if _player == null:
 		return
 	var target: float = DUCKED_DB if get_tree().paused else VOLUME_DB
+	target += _intensity * INTENSITY_VOLUME_DB
 	_player.volume_db = move_toward(_player.volume_db, target, FADE_RATE * delta)
+	var target_pitch: float = 1.0 + _intensity * INTENSITY_PITCH
+	_player.pitch_scale = move_toward(_player.pitch_scale, target_pitch, INTENSITY_RATE * delta)
 
 func is_playing() -> bool:
 	return _player != null and _player.playing

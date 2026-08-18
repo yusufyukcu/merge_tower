@@ -32,6 +32,28 @@ static func dot_texture() -> GradientTexture2D:
 	return radial_texture(Color(1, 1, 1, 1), Color(1, 1, 1, 0), 8)
 
 
+# A hard-edged square rather than the soft blob above, kept once and shared:
+# every particle system in the game that wants one wants the same one.
+#
+# Blood is not light. A soft dot is the right shape for a spark, an ember or a
+# mote of dust -- things that glow and have no edge -- and the wrong shape for a
+# speck of matter, which reads as smoke however red it is painted. Drawn with
+# nearest filtering this stays a square at any size, which is what puts the
+# spray in the same language as the pixel art it comes off.
+static var _pixel_tex: GradientTexture2D = null
+
+static func pixel_texture() -> GradientTexture2D:
+	if _pixel_tex != null:
+		return _pixel_tex
+	var solid := Color(1, 1, 1, 1)
+	_pixel_tex = GradientTexture2D.new()
+	_pixel_tex.gradient = ramp(solid, solid)
+	_pixel_tex.fill = GradientTexture2D.FILL_LINEAR
+	_pixel_tex.width = 4
+	_pixel_tex.height = 4
+	return _pixel_tex
+
+
 # The same soft blob stretched out of round. A radial fill is computed in UV
 # space, so a non-square texture turns the circle into an ellipse for free —
 # which is what a ribbon of falling water and the body of a flame both are.

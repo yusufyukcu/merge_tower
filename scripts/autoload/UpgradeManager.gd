@@ -12,26 +12,26 @@ const DEFS := {
 	"bow_spawn": {"name": "FLETCHER", "category": "general", "desc": "Bow spawn chance +20%", "icon": "🏹", "max_level": 3},
 	"crystal_spawn": {"name": "ARCANIST", "category": "general", "desc": "Crystal spawn chance +20%", "icon": "🔮", "max_level": 3},
 	"all_spawn_luck": {"name": "FOUR-LEAF CLOVER", "category": "general", "desc": "Rare branches catch up 10% faster", "icon": "🍀", "max_level": 3},
-	"rare_merge": {"name": "LUCKY MERGE", "category": "general", "desc": "+10% chance a merge produces a bonus unit", "icon": "✨", "max_level": 3},
+	"rare_merge": {"name": "LUCKY MERGE", "category": "general", "desc": "+10% chance a merge produces a bonus unit", "icon": "✨", "max_level": 3, "rarity": "rare"},
 
 	"warrior_hp": {"name": "TOUGH TRAINING", "category": "warrior", "desc": "Warrior HP +20%", "icon": "⚔️", "max_level": 3},
 	"warrior_damage": {"name": "SHARPENED BLADES", "category": "warrior", "desc": "Warrior damage +20%", "icon": "⚔️", "max_level": 3},
 	"warrior_aspd": {"name": "RAPID STRIKES", "category": "warrior", "desc": "Warrior attack speed +15%", "icon": "⚔️", "max_level": 3},
-	"knight_hp": {"name": "REINFORCED ARMOR", "category": "warrior", "desc": "Knight HP +25%", "icon": "🛡️", "max_level": 3},
-	"knight_damage": {"name": "HEAVY STRIKES", "category": "warrior", "desc": "Knight damage +25%", "icon": "🛡️", "max_level": 3},
+	"knight_hp": {"name": "REINFORCED ARMOR", "category": "warrior", "desc": "Knight HP +25%", "icon": "🛡️", "max_level": 3, "rarity": "rare"},
+	"knight_damage": {"name": "HEAVY STRIKES", "category": "warrior", "desc": "Knight damage +25%", "icon": "🛡️", "max_level": 3, "rarity": "rare"},
 
 	"archer_damage": {"name": "RAZOR ARROWS", "category": "archer", "desc": "Archer damage +20%", "icon": "🏹", "max_level": 3},
 	"archer_aspd": {"name": "RAPID FIRE", "category": "archer", "desc": "Archer attack speed +20%", "icon": "🏹", "max_level": 3},
 	"archer_range": {"name": "EAGLE EYE", "category": "archer", "desc": "Archer/Master Archer range +20%", "icon": "🏹", "max_level": 3},
-	"master_archer_damage": {"name": "PRECISION SHOT", "category": "archer", "desc": "Master Archer damage +25%", "icon": "🎯", "max_level": 3},
+	"master_archer_damage": {"name": "PRECISION SHOT", "category": "archer", "desc": "Master Archer damage +25%", "icon": "🎯", "max_level": 3, "rarity": "rare"},
 
-	"mage_damage": {"name": "ARCANE POWER", "category": "mage", "desc": "Mage damage +25%", "icon": "🔮", "max_level": 3},
+	"mage_damage": {"name": "ARCANE POWER", "category": "mage", "desc": "Mage damage +25%", "icon": "🔮", "max_level": 3, "rarity": "rare"},
 	"mage_aoe": {"name": "WIDER BLAST", "category": "mage", "desc": "Mage AoE radius +20%", "icon": "💥", "max_level": 3},
 	"mage_aspd": {"name": "QUICK CASTING", "category": "mage", "desc": "Mage attack speed +15%", "icon": "🔮", "max_level": 3},
 
 	"fortress_max_hp": {"name": "REINFORCED WALLS", "category": "fortress", "desc": "Fortress maximum HP +20", "icon": "🏰", "max_level": 3},
 	"fortress_heal": {"name": "EMERGENCY REPAIRS", "category": "fortress", "desc": "Heal fortress 20% of max HP now", "icon": "🧱", "max_level": 3},
-	"defender_damage": {"name": "WAR HORN", "category": "fortress", "desc": "All defender damage +10%", "icon": "📯", "max_level": 3},
+	"defender_damage": {"name": "WAR HORN", "category": "fortress", "desc": "All defender damage +10%", "icon": "📯", "max_level": 3, "rarity": "rare"},
 }
 
 var levels: Dictionary = {}
@@ -52,14 +52,39 @@ func get_def(id: String) -> Dictionary:
 func get_level(id: String) -> int:
 	return levels.get(id, 0)
 
+# A run that has already proven itself against the whole game -- reached wave
+# 30 in some past attempt, not this one -- gets one more step on every card
+# than a first run does. Permanent, like everything MetaManager holds, so it
+# never has to be earned twice.
+func effective_max_level(id: String) -> int:
+	var base: int = int(DEFS.get(id, {}).get("max_level", 3))
+	return base + 1 if MetaManager.has_tier4() else base
+
+# Rare cards are worth three ordinary ones in the draw rather than being flatly
+# excluded from it, so the deeper stat lines still turn up -- just less often,
+# which is what makes seeing one feel like something.
+const RARE_WEIGHT := 1
+const COMMON_WEIGHT := 3
+
 func get_random_choices(n: int) -> Array:
-	var available: Array = []
+	var pool: Array = []
 	for id in DEFS.keys():
-		var max_level: int = DEFS[id].get("max_level", 3)
-		if levels.get(id, 0) < max_level:
-			available.append(id)
-	available.shuffle()
-	return available.slice(0, min(n, available.size()))
+		if levels.get(id, 0) >= effective_max_level(id):
+			continue
+		var rarity: String = String(DEFS[id].get("rarity", "common"))
+		var weight: int = RARE_WEIGHT if rarity == "rare" else COMMON_WEIGHT
+		for i in range(weight):
+			pool.append(id)
+	pool.shuffle()
+
+	var chosen: Array = []
+	for id in pool:
+		if chosen.has(id):
+			continue
+		chosen.append(id)
+		if chosen.size() >= n:
+			break
+	return chosen
 
 func apply(id: String) -> void:
 	levels[id] = levels.get(id, 0) + 1

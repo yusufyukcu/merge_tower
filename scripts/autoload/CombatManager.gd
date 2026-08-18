@@ -5,6 +5,9 @@ const ImpactEffect = preload("res://scripts/fx/ImpactEffect.gd")
 const Shockwave = preload("res://scripts/fx/Shockwave.gd")
 const ArrowRain = preload("res://scripts/fx/ArrowRain.gd")
 const FxUtil = preload("res://scripts/fx/FxUtil.gd")
+const PierceShot = preload("res://scripts/fx/PierceShot.gd")
+const VoidHole = preload("res://scripts/fx/VoidHole.gd")
+const DarkRise = preload("res://scripts/fx/DarkRise.gd")
 
 # Ticks all defenders/enemies each physics frame in a circular arena centered
 # on the fortress, organised into four lanes -- north, east, south, west.
@@ -33,6 +36,15 @@ var totems: Array = []
 # Circles of cold opened by ice wizards. The enemy's answer to a totem: they
 # expire on their own, so unlike totems nothing has to take them down.
 var fields: Array = []
+# The zombie lord's leavings, and what he spends them on.
+#
+# `skulls` is every mark still standing on the field; RISE OF THE DAMNED reads
+# this list and empties it. `zombies` is what came up out of them -- allies with
+# a clock on them that fight but cannot be fought (see Zombie). Both are kept
+# here for the same reason `totems` is: this is where the thing that has to look
+# at them lives.
+var skulls: Array = []
+var zombies: Array = []
 var fortress: Fortress = null
 # Where anything painted on the floor goes: above the arena art, under every
 # unit, and outside the y-sorting the fight uses.
@@ -49,6 +61,8 @@ func reset_state() -> void:
 	enemies = []
 	totems = []
 	fields = []
+	skulls = []
+	zombies = []
 	fortress = null
 	fortress_center = Vector2.ZERO
 	focus_enemy = null
@@ -80,6 +94,11 @@ func init(p_fortress: Fortress, p_center: Vector2, p_defense_radius: float,
 # for it to do: the alternative is a line still aiming at a corpse.
 
 signal focus_changed(enemy: Enemy)
+# A boss slam landing, for Main to shake the screen over -- CombatManager owns
+# the timing (the slam lands mid-animation, not the instant the timer fires),
+# Main owns what shaking the screen even means, and neither has to know
+# anything about the other beyond this one signal.
+signal boss_slam_landed(enemy: Enemy)
 
 var focus_enemy: Enemy = null
 
@@ -237,7 +256,9 @@ func _approach(enemy: Enemy, want_angle: float, want_radius: float, delta: float
 		enemy.update_position(fortress_center)
 		return true
 
-	var k: float = minf(1.0, enemy.speed * delta / remaining)
+	# The pace it is actually keeping rather than the one its stat line names --
+	# a body the void master has touched covers this ground at half speed.
+	var k: float = minf(1.0, enemy.move_speed() * delta / remaining)
 	enemy.angle += d_angle * k
 	enemy.current_radius += d_radius * k
 	enemy.update_position(fortress_center)
@@ -392,6 +413,9 @@ func _physics_process(delta: float) -> void:
 		# given, and neither should be paused by the unit being iced or lifted.
 		defender.tick_ability(delta)
 		defender.tick_rally(delta)
+		# The same rule for the hour a cronomancer is holding open: it was paid
+		# for and it runs itself out whatever happens to him afterwards.
+		defender.tick_aura(delta)
 		# Iced solid: it holds its slot and its lane, and can still be killed --
 		# it simply does not get a turn until it thaws.
 		if defender.tick_frozen(delta):
@@ -408,6 +432,18 @@ func _physics_process(delta: float) -> void:
 				_process_support_defender(defender, delta)
 			_:
 				_process_ranged_defender(defender, delta)
+
+	# Walked backwards and edited in place, the way the frost fields are: these
+	# take themselves off the field when their clock runs out, and removing from
+	# the front of an array being read forwards skips whatever slides into the
+	# gap. Ticked before the enemies so a zombie's blow lands in the same frame
+	# it was aimed in.
+	for i in range(zombies.size() - 1, -1, -1):
+		var z: Zombie = zombies[i]
+		if not is_instance_valid(z) or not z.is_alive():
+			zombies.remove_at(i)
+			continue
+		z.tick(delta)
 
 	for enemy in enemies.duplicate():
 		if not is_instance_valid(enemy):
@@ -435,7 +471,8 @@ func _process_boss_slam(enemy: Enemy, delta: float) -> void:
 	enemy.play_attack(fortress_center - enemy.global_position, func() -> void:
 		for d in defenders.duplicate():
 			if is_instance_valid(d) and d.is_alive():
-				d.take_damage(slam))
+				d.take_damage(slam)
+		boss_slam_landed.emit(enemy))
 
 # The ice wolf's charge. The cooldown runs wherever the animal is -- one that
 # spends its first seconds walking arrives with the charge in hand -- but it is
@@ -663,11 +700,92 @@ func _process_ranged_defender(defender: Defender, delta: float) -> void:
 # flies along its own length.
 const VINE_FRAMES := ["res://art/fx_vine_1.png"]
 
+# ------------------------------------------------------------- hero passives
+#
+# The two halves of what a hero's blow does beyond the number. They are split
+# because they answer different questions: `hero_touch` is asked once of every
+# body a blow reaches, and `hero_land` once of the blow itself.
+#
+# Both are no-ops for every unit that is not a hero -- the fields they read are
+# left at their neutral values in Defender -- so the callers never have to ask
+# what kind of unit they are holding.
+
+# What the blow leaves on one struck body.
+func hero_touch(by: Defender, hit: Enemy) -> void:
+	if by == null or not is_instance_valid(by):
+		return
+	if hit == null or not is_instance_valid(hit):
+		return
+	# Drawn before the survival check: a blow that killed outright still landed,
+	# and the hero's own burst is most of what says which hero landed it.
+	if by.hero_hit_art != "":
+		_hero_burst(by.hero_hit_art, hit.global_position)
+	if not hit.is_alive():
+		return
+	if by.hero_slow < 1.0 and by.hero_slow_time > 0.0:
+		hit.apply_slow(by.hero_slow, by.hero_slow_time, by.hero_slow_tint)
+	if by.hero_venom > 0.0:
+		hit.apply_poison(by.hero_venom_time, by.hero_venom, by)
+
+# The burst off the hero's own design sheet, over the body it landed on. Above
+# the fight rather than in it, so it is never drawn behind whatever it hit.
+func _hero_burst(art: String, at: Vector2) -> void:
+	var host: Node2D = _air_host()
+	if host == null:
+		return
+	var s := FxUtil.glow(host, load(art), 0.26, 0.95)
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	s.global_position = at + Vector2(0, -20.0)
+	s.z_index = 70
+	var tw := s.create_tween()
+	tw.tween_property(s, "scale", Vector2.ONE * 0.46, 0.24) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(s, "modulate:a", 0.0, 0.26)
+	tw.tween_callback(s.queue_free)
+
+# What the blow does where it lands, once, however many bodies it touched.
+func hero_land(by: Defender, at: Vector2) -> void:
+	if by == null or not is_instance_valid(by):
+		return
+	# Aurelia. A share of what she is missing rather than a share of what she
+	# dealt: a hero holding a lane at full health gains nothing from it, and one
+	# that has been ground down all wave claws back most of a bar in a few
+	# swings. It is a reason to leave her standing, not a reason to ignore her.
+	if by.hero_mend > 0.0 and by.is_alive():
+		by.heal((by.max_hp - by.hp) * by.hero_mend)
+	if by.hero_knock > 0.0:
+		_hero_gale(by, at)
+
+# The windmaster's gale, which is why he is worth a slot at all: the blow is
+# aimed at one body and everything standing around it goes back with it.
+func _hero_gale(by: Defender, at: Vector2) -> void:
+	var reach: float = maxf(by.hero_knock_radius, 1.0)
+	var thrown: int = 0
+	for e in enemies.duplicate():
+		if not is_instance_valid(e) or not e.is_alive() or not e.can_be_knocked():
+			continue
+		if at.distance_to(e.global_position) > reach:
+			continue
+		e.knock_back(by.hero_knock)
+		# A body in the middle of a fight has to let go of it: it is no longer
+		# standing where it was squared up, and the soldier it had picked out
+		# should be free for whatever is next in the lane.
+		if e.state != Enemy.State.MOVING:
+			_release_claim(e)
+			e.state = Enemy.State.MOVING
+		thrown += 1
+	if thrown <= 0:
+		return
+	_ring_at(at, by.shot_tint, reach * 0.25, reach, 18.0, 3.0, 0.40)
+
 # The shot carries the damage; see Projectile for why it lands on arrival
 # rather than on release.
 func _fire_shot(defender: Defender, target: Enemy) -> void:
 	var host := defender.get_parent()
 	if host == null:
+		return
+	if defender.hero_pierce > 0.0:
+		_fire_pierce(defender, target, host)
 		return
 
 	var branch: String = UnitDatabase.get_def(defender.unit_id).get("branch", "bow")
@@ -692,12 +810,55 @@ func _fire_shot(defender: Defender, target: Enemy) -> void:
 	# archer's arrow still has to do its damage.
 	shot.fire(defender.global_position + Vector2(0, -22.0), target, kind,
 		func(hit: Enemy) -> void:
+			var landed: Vector2 = hit.global_position if is_instance_valid(hit) else origin
 			_land_shot(hit, damage, aoe, origin, defender)
 			if root_time > 0.0 or dps > 0.0:
 				if is_instance_valid(hit) and hit.is_alive():
-					hit.apply_vine(root_time, dps, _live(defender)),
+					hit.apply_vine(root_time, dps, _live(defender))
+			hero_touch(_live(defender), hit)
+			hero_land(_live(defender), landed),
 		defender.shot_tint, defender.shot_scale, defender.shot_sparkle,
-		VINE_FRAMES if root_time > 0.0 else [])
+		_shot_frames(defender, root_time))
+
+# The pictures a shot flies as. A hero brings its own three -- the seed, the
+# middle of the flight and the whole thing about to land, in that order, which
+# is exactly the order Projectile steps through them in. Everything else either
+# throws the vine sprig or is drawn by Projectile itself.
+func _shot_frames(defender: Defender, root_time: float) -> Array:
+	var id: String = defender.unit_id
+	if UnitDatabase.is_hero(id):
+		var out: Array = []
+		for i in range(3):
+			var path := "res://art/%s_shot_%d.png" % [id, i]
+			if ResourceLoader.exists(path):
+				out.append(path)
+		if not out.is_empty():
+			return out
+	return VINE_FRAMES if root_time > 0.0 else []
+
+# Lumen Strike's shot, and the only one that does not stop at what it was aimed
+# at: it is loosed along the line to its target and keeps going for the whole of
+# the hero's reach, taking everything standing on that line with it.
+#
+# `hero_land` is spent here rather than on contact, because a wave that never
+# arrives anywhere has no single point of impact to spend it at. Nothing is lost
+# by that: the only hero who pierces has neither of the things it does.
+func _fire_pierce(defender: Defender, target: Enemy, host: Node) -> void:
+	var damage: float = defender.damage
+	var aoe: float = defender.aoe_radius
+	var origin: Vector2 = defender.global_position
+	var from: Vector2 = origin + Vector2(0, -22.0)
+	var aim: Vector2 = target.global_position - from
+
+	var shot := PierceShot.new()
+	host.add_child(shot)
+	shot.fire(from, aim, defender.attack_range * 1.15, defender.hero_pierce,
+		func(hit: Enemy) -> void:
+			_land_shot(hit, damage, aoe, origin, defender)
+			hero_touch(_live(defender), hit),
+		defender.shot_tint, defender.shot_scale,
+		_shot_frames(defender, 0.0))
+	hero_land(_live(defender), from)
 
 # The unit if it is still standing, and null if it is not. Everything that
 # credits a kill goes through this, so a freed node is never handed on.
@@ -727,11 +888,18 @@ func _process_enemy(enemy: Enemy, delta: float) -> void:
 	enemy.tick_vine(delta)
 	if not enemy.is_alive():
 		return
+	enemy.tick_slow(delta)
+	enemy.tick_chrono(delta)
 
 	# Still arriving: a boss holds where it broke through until its entrance has
 	# played, and takes hits the whole time like anything else standing there.
 	if enemy.entry_timer > 0.0:
 		enemy.entry_timer -= delta
+		return
+
+	# Being thrown back owns the body for as long as it lasts: it neither walks
+	# nor fights while the gale has it, and it is put down wherever it lands.
+	if enemy.tick_knock(delta, fortress_center):
 		return
 
 	match enemy.state:
@@ -789,7 +957,7 @@ func _process_enemy(enemy: Enemy, delta: float) -> void:
 			if _approach(enemy, want_angle, stop_radius, delta) and target != null:
 				target.engaged_enemy = enemy
 				enemy.state = Enemy.State.ENGAGING
-				enemy._attack_timer = enemy.attack_interval
+				enemy._attack_timer = enemy.effective_interval()
 		Enemy.State.ENGAGING:
 			if enemy.target_defender == null or not is_instance_valid(enemy.target_defender) or not enemy.target_defender.is_alive():
 				_release_claim(enemy)
@@ -797,7 +965,7 @@ func _process_enemy(enemy: Enemy, delta: float) -> void:
 				return
 			enemy._attack_timer -= delta
 			if enemy._attack_timer <= 0.0:
-				enemy._attack_timer = enemy.attack_interval
+				enemy._attack_timer = enemy.effective_interval()
 				# Dealt on the frame the blow is drawn landing, so the soldier
 				# has to still be standing then rather than only now.
 				var d: Defender = enemy.target_defender
@@ -815,7 +983,7 @@ func _process_enemy(enemy: Enemy, delta: float) -> void:
 				return
 			enemy._attack_timer -= delta
 			if enemy._attack_timer <= 0.0:
-				enemy._attack_timer = enemy.attack_interval
+				enemy._attack_timer = enemy.effective_interval()
 				var at: Vector2 = enemy.global_position
 				enemy.play_attack(fortress_center - at, func() -> void:
 					if is_instance_valid(fortress):
@@ -845,6 +1013,7 @@ func cast_ability(defender: Defender) -> bool:
 	var spec: Dictionary = defender.ability_def()
 	if spec.is_empty():
 		return false
+	var kind: String = UnitDatabase.get_ability_id(defender.unit_id)
 
 	var at: Vector2 = defender.global_position
 	if bool(spec.get("ranged", false)):
@@ -856,16 +1025,54 @@ func cast_ability(defender: Defender) -> bool:
 			return false
 		at = aim.global_position
 
+	# The two hero casts refuse for reasons of their own, and both are checked
+	# here rather than inside the cast for the same reason the aim above is: a
+	# refusal must happen before the cooldown is spent, not after.
+	if kind == "void_collapse" and _living_enemies().is_empty():
+		defender.float_text("NO TARGET", Color(0.78, 0.80, 0.90))
+		return false
+	if kind == "rise_damned" and _standing_skulls().is_empty():
+		defender.float_text("NO SKULLS", Color(0.78, 0.80, 0.90))
+		return false
+	if kind == "time_stop" and _living_enemies().is_empty():
+		defender.float_text("NO TARGET", Color(0.78, 0.80, 0.90))
+		return false
+
 	defender.start_ability_cooldown()
 	defender.float_text(String(spec.get("name", "")), spec.get("color", Color(1, 1, 1)))
 
-	match UnitDatabase.get_ability_id(defender.unit_id):
+	match kind:
 		"arrow_rain": _cast_arrow_rain(defender, spec, at)
 		"meteor": _cast_meteor(defender, spec, at)
 		"war_slam": _cast_war_slam(defender, spec)
 		"briar": _cast_briar(defender, spec, at)
 		"rally": _cast_rally(defender, spec)
+		"void_collapse": _cast_void_collapse(defender, spec)
+		"rise_damned": _cast_rise_damned(defender, spec)
+		"time_stop": _cast_time_stop(defender, spec)
 	return true
+
+func _living_enemies() -> Array:
+	var out: Array = []
+	for e in enemies:
+		if is_instance_valid(e) and e.is_alive():
+			out.append(e)
+	return out
+
+# A hero's cast is drawn on the body rather than simply happening, and a body can
+# only be drawn doing one thing at a time.
+#
+# The unit's own attack timer is pushed past the end of the cast before it
+# starts. Without that, the next ordinary swing lands mid-animation, calls
+# play_attack again, and kills the frame tween the cast was riding on -- so the
+# blow never reaches its contact frame and the whole ability quietly does
+# nothing. It is the same thing the ice wolf does to its own bite when it
+# charges: one animation owns the body until it is finished with it.
+const CAST_HOLD_SLACK := 0.08
+
+func _play_cast(d: Defender, on_hit: Callable) -> void:
+	d._attack_timer = maxf(d._attack_timer, d.attack_length() + CAST_HOLD_SLACK)
+	d.play_attack(_outward(d), on_hit)
 
 # The body to drop it on. The player's own pick first, and failing that whoever
 # has the most company inside the circle the ability would cover -- with the one
@@ -1067,6 +1274,260 @@ func _cast_briar(d: Defender, spec: Dictionary, at: Vector2) -> void:
 			continue
 		if at.distance_to(e.global_position) <= radius:
 			e.apply_vine(hold, dps, _live(d))
+
+# --- the collapse -----------------------------------------------------------
+#
+# The void master's. It is not aimed and it does not pick anything: a tear opens
+# under every body on the field at once, and a moment later they all shut.
+#
+# What makes it worth a button rather than another bolt is that it reaches the
+# lanes he is not holding. A hero standing on the north road can answer a
+# breakthrough in the south with it, which is the one thing nothing else in the
+# game lets a single unit do.
+
+# How far apart in time the holes open. Small, but not zero: forty tears
+# appearing on the same frame reads as a screen effect, and a ripple of them
+# spreading across the field reads as something being done to the enemy.
+const COLLAPSE_STAGGER := 0.035
+
+func _cast_void_collapse(d: Defender, spec: Dictionary) -> void:
+	var host: Node2D = _ground_host()
+	if host == null:
+		return
+	var radius: float = float(spec.get("radius", 96.0))
+	# Read now and spent on each hole: the collapse hits for what the hero was
+	# worth when he threw it, even if he is cut down before the last one shuts.
+	var dealt: float = d.damage * float(spec.get("power", 3.0))
+	var tint: Color = spec.get("color", Color(1, 1, 1))
+
+	# Thrown rather than simply happening: he plays the same drawn cast he shoots
+	# with, and the field opens on the beat his hands come down. Every other blow
+	# in the game lands on a frame, and this one should be no different.
+	_play_cast(d, func() -> void:
+		_open_collapse(host, _live(d), radius, dealt, tint))
+
+func _open_collapse(host: Node2D, d: Defender, radius: float, dealt: float,
+		tint: Color) -> void:
+	if host == null or not is_instance_valid(host):
+		return
+	# Ordered from the wall outward, so the ripple runs from whatever is closest
+	# to killing us back out to whatever has only just arrived.
+	var targets: Array = _living_enemies()
+	targets.sort_custom(func(a: Enemy, b: Enemy) -> bool:
+		return a.current_radius < b.current_radius)
+
+	for i in range(targets.size()):
+		var e: Enemy = targets[i]
+		var at: Vector2 = e.global_position
+		var hole := VoidHole.new()
+		host.add_child(hole)
+		hole.global_position = at
+		# A tear opens where the body is standing *now* and stays there. Following
+		# the body would make it a leash rather than a trap, and the whole point of
+		# the wind-up is that the ground is marked before it shuts.
+		var open := func() -> void:
+			if not is_instance_valid(hole):
+				return
+			hole.play(radius, func() -> void: _damage_around(at, radius, dealt, d))
+		if i == 0:
+			open.call()
+		else:
+			var wait := hole.create_tween()
+			wait.tween_interval(COLLAPSE_STAGGER * float(i))
+			wait.tween_callback(open)
+
+	if d != null:
+		_ring_at(d.global_position, tint, 30.0, 260.0, 20.0, 3.0, 0.5)
+
+# --- the rising -------------------------------------------------------------
+#
+# The zombie lord's, and the only ability in the game that spends something
+# other than time. Every skull his bite has left standing on the field turns
+# into that creature's zombie, and they go and fight for us.
+#
+# It is deliberately all-or-nothing: there is no way to raise half of them, so
+# the decision the player is actually making is *when*, and the answer is always
+# "one skull later than I just thought".
+
+func _cast_rise_damned(d: Defender, _spec: Dictionary) -> void:
+	var host: Node2D = _ground_host()
+	var field: Node = d.get_parent()
+	# The drawn cast off his own sheet, with the dead coming up on the beat the
+	# rot bursts out of him. The list is read then rather than now, so a skull
+	# that rots away during the wind-up is one he does not get.
+	_play_cast(d, func() -> void:
+		_burst_at_feet(host, d)
+		_raise_all(host, field, _live(d)))
+
+# The eruption the casting row draws around his boots. It is only ever this: the
+# blow itself lands wherever the skulls are, and this is what says it came from
+# him.
+const CAST_BURST := ["res://art/fx_dark_burst_0.png", "res://art/fx_dark_burst_1.png"]
+
+func _burst_at_feet(host: Node2D, d: Defender) -> void:
+	if host == null or not is_instance_valid(host) or d == null or not is_instance_valid(d):
+		return
+	var at: Vector2 = d.global_position
+	for i in range(CAST_BURST.size()):
+		var path: String = CAST_BURST[i]
+		if not ResourceLoader.exists(path):
+			continue
+		var s := FxUtil.glow(host, load(path), 0.6, 0.0)
+		s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		var tex: Vector2 = s.texture.get_size()
+		s.offset = Vector2(0, -tex.y * 0.5)
+		s.global_position = at
+		s.z_index = 26
+		# The two drawings are the same eruption a beat apart, so they are played
+		# as two beats rather than stacked.
+		var tw := s.create_tween()
+		tw.tween_interval(0.09 * float(i))
+		tw.tween_property(s, "modulate:a", 0.95, 0.08)
+		tw.parallel().tween_property(s, "scale", Vector2(1.35, 1.35), 0.30) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(s, "modulate:a", 0.0, 0.24)
+		tw.tween_callback(s.queue_free)
+
+func _raise_all(host: Node2D, field: Node, d: Defender) -> void:
+	var marks: Array = _standing_skulls()
+	for i in range(marks.size()):
+		var mark = marks[i]
+		var at: Vector2 = mark.global_position
+		var kind: String = String(mark.enemy_id)
+		var size: float = float(mark.body_size)
+		# Claimed and taken off the field before anything else, so nothing can
+		# raise the same skull twice and nothing is left standing where a body is
+		# about to be.
+		mark.consume()
+		skulls.erase(mark)
+
+		if host == null or not is_instance_valid(host):
+			_raise_zombie(field, at, kind, d, size)
+			continue
+
+		# The plume goes on the floor layer and the body it announces into the
+		# fight, so the fire is under the zombie's feet rather than over its head.
+		var rise := DarkRise.new()
+		host.add_child(rise)
+		rise.global_position = at
+		var raise_here := func() -> void:
+			rise.play(size, func() -> void: _raise_zombie(field, at, kind, d, size))
+		# Staggered along the row so a lane's worth of them comes up as a wave
+		# rather than as one flash.
+		var delay: float = COLLAPSE_STAGGER * 2.0 * float(i)
+		if delay <= 0.0:
+			raise_here.call()
+		else:
+			var wait := rise.create_tween()
+			wait.tween_interval(delay)
+			wait.tween_callback(raise_here)
+
+# Every mark still on the field that has something to raise. Pruned here rather
+# than on a timer: a skull frees itself when it rots away, so the list is only
+# ever wrong between that moment and the next time anybody asks.
+func _standing_skulls() -> Array:
+	var out: Array = []
+	for i in range(skulls.size() - 1, -1, -1):
+		var s = skulls[i]
+		if not is_instance_valid(s):
+			skulls.remove_at(i)
+		elif s.is_raisable():
+			out.append(s)
+	out.reverse()
+	return out
+
+func add_skull(mark: Node2D) -> void:
+	skulls.append(mark)
+
+func _raise_zombie(host: Node, at: Vector2, enemy_id: String, by: Defender,
+		size: float) -> void:
+	if host == null or not is_instance_valid(host):
+		return
+	var z := Zombie.new()
+	host.add_child(z)
+	z.global_position = at
+	z.setup(enemy_id, _live(by), size)
+	zombies.append(z)
+
+# --- the hour ---------------------------------------------------------------
+#
+# The cronomancer's, and the only cast in the game that deals no damage at all.
+# Every enemy standing on the field when it goes off spends the next few seconds
+# walking and swinging at a fraction of its own pace, and the hero holds the
+# hour open for exactly as long as that lasts -- the dome over him and the
+# hourglasses over them start and stop together, because they are one effect and
+# the player should never be left guessing how much of it is left.
+#
+# It catches what is already here and nothing that arrives afterwards. That is
+# the decision the ability is actually about: held for the wave that is coming
+# it is worth nothing, and spent on the rank already at the wall it buys the
+# line the seconds it needs to put that rank down.
+
+# The wave of stopped time spreading out from him, in seconds per body. Read the
+# same way the collapse's stagger is: every enemy freezing on one frame is a
+# screen effect, and a wave crossing the field is something being done to them.
+const HOUR_STAGGER := 0.03
+
+func _cast_time_stop(d: Defender, spec: Dictionary) -> void:
+	var tint: Color = spec.get("color", Color(0.46, 0.72, 1.0))
+	var seconds: float = float(spec.get("duration", 5.0))
+	var pace: float = clampf(float(spec.get("slow", 0.35)), 0.1, 0.95)
+
+	# Thrown rather than simply happening, like every other hero cast: the hour
+	# opens on the beat his hands come down.
+	_play_cast(d, func() -> void:
+		_open_hour(_live(d), seconds, pace, tint))
+
+func _open_hour(d: Defender, seconds: float, pace: float, tint: Color) -> void:
+	var host: Node2D = _air_host()
+
+	# Nearest the wall first: the wave runs from whatever is closest to killing
+	# us back out to whatever has only just walked on.
+	var targets: Array = _living_enemies()
+	targets.sort_custom(func(a: Enemy, b: Enemy) -> bool:
+		return a.current_radius < b.current_radius)
+
+	for i in range(targets.size()):
+		var e: Enemy = targets[i]
+		var catch := func() -> void:
+			if not is_instance_valid(e) or not e.is_alive():
+				return
+			e.apply_chrono(pace, seconds)
+			_hour_burst(host, e.global_position, tint)
+		if i == 0:
+			catch.call()
+		else:
+			var wait := get_tree().create_timer(HOUR_STAGGER * float(i))
+			wait.timeout.connect(catch)
+
+	if d == null or not is_instance_valid(d):
+		return
+	d.enter_aura(seconds, tint)
+	_ring_at(d.global_position, tint, 40.0, 320.0, 22.0, 3.0, 0.55)
+	Sfx.chrono()
+
+# The moment one body is caught: the clock face off the sheet, flaring where it
+# was standing and gone again. The hourglass that stays is the mark's business.
+const TEX_HOUR_BURST := "res://art/fx_chrono_burst.png"
+
+func _hour_burst(host: Node2D, at: Vector2, tint: Color) -> void:
+	if host == null or not is_instance_valid(host) or not ResourceLoader.exists(TEX_HOUR_BURST):
+		return
+	var s := Sprite2D.new()
+	s.texture = load(TEX_HOUR_BURST)
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	s.material = FxUtil.additive()
+	host.add_child(s)
+	s.global_position = at
+	var k: float = 88.0 / maxf(float(s.texture.get_width()), 1.0)
+	s.scale = Vector2(k, k) * 0.4
+	s.modulate = Color(tint.r, tint.g, tint.b, 0.95)
+	var tw := s.create_tween()
+	tw.tween_property(s, "scale", Vector2(k, k), 0.20) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(s, "modulate:a", 0.0, 0.28) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(s.queue_free)
 
 # --- the rally --------------------------------------------------------------
 

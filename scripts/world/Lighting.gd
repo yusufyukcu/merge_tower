@@ -66,11 +66,12 @@ const MOODS := [
 	{"wave": 29, "night": 0.90, "sky": Color(0.54, 0.55, 0.80), "rim": Color(1.00, 0.70, 0.42)},
 ]
 
-# Where the changeover leaves it. Colder than the dusk it comes out of and, for
-# the first time in the run, lit from above rather than from the fires: a clear
-# winter night over snow has a great deal of light in it, and all of it is blue.
+# Where the changeover leaves it. Colder than the dusk it comes out of, but
+# left in daylight rather than pushed into night: a full night grade on top of
+# the snow art read as two effects fighting each other instead of one place,
+# so winter is a palette change and not a second sundown.
 const WINTER_MOOD := {
-	"night": 1.00, "sky": Color(0.46, 0.56, 0.90), "rim": Color(0.82, 0.90, 1.00)
+	"night": 0.00, "sky": Color(0.82, 0.88, 1.00), "rim": Color(0.95, 0.97, 1.00)
 }
 
 # Long enough that the player sees the light change rather than finding it
@@ -372,6 +373,10 @@ var _graded: Array[ShaderMaterial] = []
 var _vignette: ShaderMaterial = null
 var _cur: Dictionary = {}
 var _tween: Tween = null
+# Set the moment winter lands. Night no longer climbs high enough on its own
+# to mark that the changeover happened, so this is what set_wave checks to
+# know the daylight table is done owning the sky.
+var _winter: bool = false
 
 func _init() -> void:
 	# The light has to keep moving through the upgrade screen: the changeover at
@@ -417,11 +422,12 @@ func attach_vignette(parent: Control, rect: Rect2) -> void:
 func set_wave(wave: int) -> void:
 	# Past the changeover the winter mood owns the sky, and a wave counter that
 	# kept walking the daylight table would start dragging it back toward dusk.
-	if _cur.get("night", 0.0) >= float(WINTER_MOOD["night"]) - 0.001:
+	if _winter:
 		return
 	_go(_mood_for_wave(wave), MOOD_FADE)
 
 func to_winter(secs: float) -> void:
+	_winter = true
 	_go({
 		"night": float(WINTER_MOOD["night"]),
 		"sky": WINTER_MOOD["sky"] as Color,

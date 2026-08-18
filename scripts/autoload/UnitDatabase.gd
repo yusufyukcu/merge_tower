@@ -191,7 +191,124 @@ const DEFS := {
 		"hp": 220.0, "damage": 0.0, "attack_interval": 1.0, "range": 0.0, "aoe_radius": 0.0,
 		"totem_art": "res://art/totem_3.png", "totem_radius": 285.0, "totem_haste": 1.7,
 	},
+
+	# --- The heroes ---
+	#
+	# One of these is chosen from the menu before a run and is standing on the
+	# field the moment the run begins; nothing merges into a hero and no hero
+	# merges into anything, so they sit in this table for their stats and their
+	# art and take no part in the tray at all. The run is handed a free field
+	# slot to carry it (see Main._spawn_hero), so choosing one never costs the
+	# player a unit they would otherwise have fielded.
+	#
+	# Every one of them has a passive nobody else has, written as its own key so
+	# the effect lives with the stats it is balanced against:
+	#
+	#   "hero_slow"       the blow leaves the body slower for "hero_slow_time"
+	#   "hero_mend"       the fraction of its own missing health a hit gives back
+	#   "hero_pierce"     the shot runs on through, hitting everything on the line
+	#   "hero_knock"      the blow throws back everything within "hero_knock_radius"
+	#   "hero_skull"      a kill leaves a skull standing where the body fell
+	#   "hero_venom"      the dart rots for "hero_venom_time" after it lands
+	#
+	# Stat-wise they sit alongside a level 4 merge: a hero should be worth
+	# building a line around and never worth more than the line itself.
+	"hero_void_master": {
+		"branch": "hero", "level": 4, "name": "VOID MASTER", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "THE WEAVER OF NOTHINGNESS",
+		"merge_into": "", "radius": 56.0, "color": Color(0.62, 0.34, 0.96),
+		"hp": 240.0, "damage": 44.0, "attack_interval": 1.6, "range": 400.0, "aoe_radius": 62.0,
+		"shot_tint": Color(0.88, 0.62, 1.0), "shot_scale": 0.52,
+		"hero_slow": 0.5, "hero_slow_time": 2.6,
+		"desc": "Void balls leave whatever they touch crawling.",
+	},
+	"hero_aurelia": {
+		"branch": "hero", "level": 4, "name": "AURELIA", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "LIGHTBRINGER",
+		"merge_into": "", "radius": 56.0, "color": Color(1.0, 0.82, 0.34),
+		"hp": 300.0, "damage": 38.0, "attack_interval": 1.3, "range": 380.0, "aoe_radius": 0.0,
+		"shot_tint": Color(1.0, 0.88, 0.48), "shot_scale": 0.55,
+		"hero_mend": 0.18,
+		"desc": "Every hit closes a share of her own wounds.",
+	},
+	"hero_lumen_strike": {
+		"branch": "hero", "level": 4, "name": "LUMEN STRIKE", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "THE BEAM OF JUSTICE",
+		"merge_into": "", "radius": 56.0, "color": Color(1.0, 0.78, 0.28),
+		"hp": 250.0, "damage": 40.0, "attack_interval": 1.5, "range": 460.0, "aoe_radius": 0.0,
+		"shot_tint": Color(1.0, 0.84, 0.36), "shot_scale": 0.6,
+		"hero_pierce": 52.0,
+		"desc": "The light wave runs on through the whole rank.",
+	},
+	"hero_windmaster": {
+		"branch": "hero", "level": 4, "name": "WINDMASTER", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "MASTER OF THE GALE",
+		"merge_into": "", "radius": 56.0, "color": Color(0.80, 0.95, 0.45),
+		"hp": 250.0, "damage": 34.0, "attack_interval": 1.6, "range": 400.0, "aoe_radius": 55.0,
+		"shot_tint": Color(0.86, 1.0, 0.52), "shot_scale": 0.5,
+		"hero_knock": 130.0, "hero_knock_radius": 135.0,
+		"desc": "The gale throws back everything where it lands. Bosses stand.",
+	},
+	# "ascend_anim" is the second set of drawings a hero grows into once its own
+	# ability comes in: the zombie lord stops being a corpse with a grudge and
+	# becomes the thing on the front of his own design sheet. Nothing but the art
+	# changes -- see Defender._ascend -- because the promotion the player is
+	# actually being given is the button, and a stat jump on top of it would make
+	# the level that unlocks it the only level that matters.
+	"hero_zombie_lord": {
+		"branch": "hero", "level": 4, "name": "ZOMBIE LORD", "is_unit": true, "role": "melee",
+		"is_hero": true, "title": "RULER OF THE ROTTEN",
+		"merge_into": "", "radius": 58.0, "color": Color(0.55, 0.86, 0.42),
+		"hp": 640.0, "damage": 52.0, "attack_interval": 1.3, "range": 130.0, "aoe_radius": 0.0,
+		"slash_tint": Color(0.62, 0.95, 0.48),
+		"hero_skull": true, "ascend_anim": "hero_zombie_lord_up",
+		"desc": "Whatever his bite kills leaves a skull behind.",
+	},
+	"hero_venom_dartmaster": {
+		"branch": "hero", "level": 4, "name": "VENOM DARTMASTER", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "MASTER OF POISONED BREATH",
+		"merge_into": "", "radius": 54.0, "color": Color(0.72, 1.0, 0.30),
+		"hp": 230.0, "damage": 24.0, "attack_interval": 1.1, "range": 430.0, "aoe_radius": 0.0,
+		"shot_tint": Color(0.82, 1.0, 0.40), "shot_scale": 0.62,
+		"hero_venom": 22.0, "hero_venom_time": 4.0,
+		"desc": "Darts leave a rot that keeps working long after they land.",
+	},
+	# "aura_anim" is the row a hero is drawn out of for as long as its cast is
+	# running, and the only one of these that is temporary: the cronomancer turns
+	# to face the field and holds the hour open, then goes back to the row he came
+	# from when it closes. See Defender.enter_aura.
+	#
+	# His passive is the same slow his cast is, at a fraction of the depth and on
+	# one body at a time -- the button is the hour, the bolts are the minutes.
+	"hero_cronomancer": {
+		"branch": "hero", "level": 4, "name": "CRONOMANCER", "is_unit": true, "role": "ranged",
+		"is_hero": true, "title": "KEEPER OF THE HOUR",
+		"merge_into": "", "radius": 56.0, "color": Color(0.44, 0.64, 1.0),
+		"hp": 240.0, "damage": 36.0, "attack_interval": 1.5, "range": 420.0, "aoe_radius": 0.0,
+		"shot_tint": Color(0.60, 0.80, 1.0), "shot_scale": 0.52,
+		"hero_slow": 0.72, "hero_slow_time": 1.8, "hero_slow_tint": Color(0.38, 0.62, 1.0),
+		"aura_anim": "hero_cronomancer_aura",
+		"desc": "Every bolt drags at the hour of whatever it touches.",
+	},
 }
+
+# The roster, in the order the menu offers it. Kept as its own list rather than
+# filtered out of DEFS, so the order on the hero shelf is a decision and not
+# whatever order a dictionary happens to iterate in.
+const HERO_IDS := [
+	"hero_void_master", "hero_aurelia", "hero_lumen_strike",
+	"hero_windmaster", "hero_zombie_lord", "hero_venom_dartmaster",
+	"hero_cronomancer",
+]
+
+func is_hero(id: String) -> bool:
+	return bool(DEFS.get(id, {}).get("is_hero", false))
+
+# The picture the menu shows on the shelf: the framed portrait off the hero's
+# own design sheet, and "" for anything that has none.
+func get_hero_face(id: String) -> String:
+	var path := "res://art/%s_face.png" % id
+	return path if ResourceLoader.exists(path) else ""
 
 # "reward" is the gold a kill drops, roughly tracking how long the enemy takes
 # to bring down rather than its raw HP, so slow armored types stay worth it.
@@ -242,8 +359,20 @@ const ENEMY_DEFS := {
 	# --- The winter roster ---
 	#
 	# Once the golem is down the map freezes over and the field belongs to these
-	# alone; see WaveManager.WINTER_POOL.
+	# alone; see WaveManager._winter_pool.
 	#
+
+	# The mid-boss of the frozen half, ten waves into it. It throws the same
+	# slam a stone golem does -- CombatManager reads nothing about a boss
+	# except `is_boss` to know it wants one -- so this is a stat line and a
+	# name standing between the golem and the dragon, not new combat code.
+	# Tougher than the golem it follows, softer than the dragon it leads into.
+	"frost_troll": {
+		"name": "FROST TROLL", "hp": 2100.0, "damage": 30.0, "speed": 32.0,
+		"attack_interval": 1.6, "color": Color(0.58, 0.72, 0.88), "damage_reduction": 0.18,
+		"radius": 128.0, "is_boss": true, "slam_interval": 6.5, "slam_damage": 14.0,
+		"reward": 220, "gait": "lumber", "melee": "magic",
+	},
 	# The ice wolf is the first of them, and it is dangerous for what it does
 	# rather than what it hits for: "dash_*" is its charge, which crosses the gap
 	# for better than double damage and leaves whatever it lands on frozen solid
@@ -339,6 +468,10 @@ const SELL_PRICES := {2: 1, 3: 5, 4: 20}
 func get_sell_price(id: String) -> int:
 	var d: Dictionary = DEFS.get(id, {})
 	if not bool(d.get("is_unit", false)):
+		return 0
+	# A hero was never bought and cannot be replaced: there is no price at which
+	# selling the one unit the run was built around is a decision worth offering.
+	if bool(d.get("is_hero", false)):
 		return 0
 	return int(SELL_PRICES.get(int(d.get("level", 0)), 0))
 
@@ -469,10 +602,96 @@ const UNIT_ABILITY := {
 }
 
 func get_ability_id(unit_id: String) -> String:
+	if is_hero(unit_id):
+		return String(HERO_ABILITY_DEFS.get(unit_id, {}).get("kind", ""))
 	return String(UNIT_ABILITY.get(unit_id, ""))
 
 func get_ability(unit_id: String) -> Dictionary:
+	if is_hero(unit_id):
+		return HERO_ABILITY_DEFS.get(unit_id, {})
 	return ABILITY_DEFS.get(get_ability_id(unit_id), {})
+
+# --------------------------------------------------- the heroes' own abilities
+#
+# A hero earns its cast at HERO_ABILITY_LEVEL rather than the twenty a merged
+# unit needs, and it earns it on a button of its own standing over the shop
+# rather than on a card the player has to go looking for. Both differences say
+# the same thing: the hero is the unit the whole run was built around, and the
+# one blow it throws by hand should be the thing the player is watching for
+# rather than something buried a tap deep.
+#
+# Ten is early enough that a hero left holding a lane has its button lit inside
+# the first handful of waves, and the wait between casts is short enough to be
+# part of the fight rather than a once-a-run event.
+#
+# "kind" is what CombatManager dispatches on; see cast_ability there. Anything
+# without an entry here simply has no button, which is how the four heroes that
+# have not been given one yet behave.
+const HERO_ABILITY_LEVEL := 10
+
+const HERO_ABILITY_DEFS := {
+	# Not aimed at anything: it opens under everything at once, which is the
+	# whole of it. "power" is the multiplier on the hero's own damage, so the
+	# collapse grows with every level and every upgrade he has taken.
+	"hero_void_master": {
+		"kind": "void_collapse",
+		"name": "VOID COLLAPSE", "color": Color(0.72, 0.40, 1.0),
+		"cooldown": 20.0, "power": 3.2, "radius": 96.0,
+		"desc": "A black hole opens under every enemy on the field.",
+	},
+	# The one ability in the game that spends something the player has been
+	# building up rather than a cooldown alone: the skulls his bite leaves are
+	# the ammunition, and they rot away on their own if he never calls them.
+	"hero_zombie_lord": {
+		"kind": "rise_damned",
+		"name": "RISE OF THE DAMNED", "color": Color(0.62, 0.95, 0.42),
+		"cooldown": 20.0, "power": 0.0, "radius": 0.0,
+		"desc": "Every skull still standing rises to fight for you.",
+	},
+	# The only cast in the game that deals no damage at all, and the only one
+	# that lasts: for "duration" seconds every enemy already on the field walks
+	# and swings at "slow" of its own pace. It buys the line time rather than
+	# spending anything, which is why it is the shortest wait of the three --
+	# twenty seconds of cooldown for five seconds of held breath.
+	#
+	# It reaches every lane, like the void master's, and for the same reason:
+	# a hero holding the north road has to be worth something to the south one.
+	"hero_cronomancer": {
+		"kind": "time_stop",
+		"name": "HOUR OF STILLNESS", "color": Color(0.46, 0.72, 1.0),
+		"cooldown": 20.0, "power": 0.0, "radius": 0.0,
+		"duration": 5.0, "slow": 0.35,
+		"desc": "Every enemy on the field crawls for five seconds.",
+	},
+}
+
+func get_hero_ability(id: String) -> Dictionary:
+	return HERO_ABILITY_DEFS.get(id, {})
+
+# The stem the hero's button art is filed under: "hero_void_master" is drawn on
+# art/void_master_button_*.png, because the sheet was named after the hero and
+# not after the id the game gave it.
+func hero_art_key(id: String) -> String:
+	return id.trim_prefix("hero_")
+
+# ------------------------------------------------------------- the raised dead
+#
+# What a body comes back as when the zombie lord calls it up. Three drawings
+# cover the whole roster, so this is a mapping from what died to whichever of
+# them stands up in its place: the armoured ranks come back as the knight, the
+# beasts as the wolf, and anything heavy as the orc.
+#
+# Anything not named here -- a creature added later, most likely -- comes back
+# as the orc, which is the form that reads as "something big and rotten" rather
+# than as anything in particular.
+const ZOMBIE_FORMS := {
+	"armored_knight": "knight", "ice_soldier": "knight", "ice_wizard": "knight",
+	"bat": "wolf", "ice_wolf": "wolf", "ice_dragon": "wolf",
+	"goblin": "orc", "orc": "orc", "stone_golem": "orc", "frost_troll": "orc",
+}
+
+func zombie_form(enemy_id: String) -> String:
+	return String(ZOMBIE_FORMS.get(enemy_id, "orc"))
 
 
 

@@ -51,6 +51,11 @@ func add_coins(amount: int) -> void:
 	if amount <= 0:
 		return
 	coins += amount
+	# The run's purse empties at the end of it; the career total does not. Told
+	# rather than asked, so nothing here has to know the career total exists
+	# beyond the one line -- and left unsaved on purpose, since a write per coin
+	# is a write per kill. The run end saves it along with everything else.
+	MetaManager.record_gold(amount)
 	coins_changed.emit(coins)
 
 # Reports whether the purchase went through, so callers can charge and act in

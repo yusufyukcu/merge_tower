@@ -1,6 +1,7 @@
 ﻿extends Node2D
 
 const UIStyle = preload("res://scripts/ui/UIStyle.gd")
+const ChoicePlate = preload("res://scripts/ui/ChoicePlate.gd")
 const PauseMenu = preload("res://scripts/ui/PauseMenu.gd")
 const ShopPanel = preload("res://scripts/ui/ShopPanel.gd")
 const HeroAbilityButton = preload("res://scripts/ui/HeroAbilityButton.gd")
@@ -107,10 +108,8 @@ var screen_flash: ColorRect
 var game_over_panel: Control
 var defeat_plate: TextureRect
 var essence_label: Label
-var upgrade_panel: Control
-var upgrade_title: Label
-var upgrade_cards: Array = []
-var upgrade_card_ids: Array = ["", "", "", ""]
+var upgrade_panel: ChoicePlate
+var upgrade_card_ids: Array = []
 
 # Waves fought without a scratch on the fortress, and the point the merge
 # combo indicator lives at. Both are pure feel -- nothing here changes what a
@@ -174,6 +173,12 @@ func _begin_run() -> void:
 		fortress.hp = fortress.max_hp
 		_on_fortress_hp_changed(fortress.hp, fortress.max_hp)
 	GameManager.unit_slots += BlessingManager.bonus_slots()
+	# Whatever the menu shop sold for "the next run" is spent on this one, the
+	# moment it starts -- so a run that ends in the first minute still counts as
+	# the run it was bought for. The damage half of it is read live off
+	# MetaManager by every defender; only the slot has to be handed over here.
+	var bought: Dictionary = MetaManager.take_run_boosts()
+	GameManager.unit_slots += int(bought["extra_slots"])
 	var seed_id: String = BlessingManager.seed_upgrade_id()
 	if seed_id != "":
 		UpgradeManager.apply(seed_id)
@@ -186,6 +191,7 @@ func _begin_run() -> void:
 			UpgradeManager.apply(id)
 
 	_spawn_hero()
+	_spawn_squad()
 	_spawn_initial()
 	WaveManager.start()
 
@@ -218,6 +224,11 @@ func _spawn_hero() -> void:
 	hero_unit = _spawn_defender(id, lane, slot)
 	if hero_unit == null:
 		return
+	# The level the menu's gold has already bought for this hero, brought onto
+	# the field the same way the pack's own bodies bring theirs (see
+	# _spawn_carried). A hero bought up past UnitDatabase.HERO_ABILITY_LEVEL
+	# therefore arrives with its cast already in hand.
+	hero_unit.start_at_level(MetaManager.hero_level(id))
 
 	# It arrives rather than appearing. One beat of ground breaking under it is
 	# enough to say the run has started with somebody already on the field.
@@ -227,6 +238,50 @@ func _spawn_hero() -> void:
 	fx.global_position = at
 	fx.play_ground_slam(UnitDatabase.get_def(id).get("color", UIStyle.ACCENT_GOLD), 1.2)
 
+# --------------------------------------------------------------- the squad
+#
+# The two bodies picked on the menu's plaques, standing on the ring beside the
+# hero before the first piece falls. They are not a choice like the hero is:
+# the hero is chosen again every run and costs nothing, and these are taken out
+# of the pack and spent by the run starting -- what stands here is a unit the
+# player does not have any more.
+#
+# Handed a field slot each, the same way the hero is and for the same reason.
+# The pack has already paid for this body; charging it a slot as well would
+# charge twice for one unit, and the point of carrying one in is to open the
+# run with it rather than to open the run one merge short.
+func _spawn_squad() -> void:
+	for entry in MetaManager.take_squad():
+		_spawn_carried(String((entry as Dictionary)["id"]),
+			int((entry as Dictionary)["level"]))
+
+func _spawn_carried(id: String, level: int) -> void:
+	if id == "" or not UnitDatabase.is_unit(id):
+		return
+	var role: String = UnitDatabase.get_def(id).get("role", "melee")
+	var lane: int = _pick_lane(role)
+	if lane < 0:
+		return
+	var slot: int = _free_slot(lane, role)
+	if slot < 0:
+		return
+
+	GameManager.unit_slots += 1
+	var d: Defender = _spawn_defender(id, lane, slot)
+	if d == null:
+		# The board was fuller than the lane said. Give the slot back rather
+		# than leave the run one wider for a body that never arrived.
+		GameManager.unit_slots -= 1
+		return
+	d.start_at_level(level)
+
+	# Lands the way the hero does, so a run visibly opens with everything that
+	# was chosen for it already on the ground.
+	var fx := ImpactEffect.new()
+	ground_layer.add_child(fx)
+	fx.global_position = _lane_slot_position(lane, role, slot)
+	fx.play_ground_slam(UnitDatabase.get_def(id).get("color", UIStyle.ACCENT_TEAL), 0.9)
+
 # ---------------------------------------------------------------- background
 
 # Where the four roads meet on art/environment.png, as a fraction of the
@@ -234,13 +289,26 @@ func _spawn_hero() -> void:
 # is hung from.
 const ENV_CROSSROADS := Vector2(0.497, 0.492)
 
-# The two paintings of the same crossroads: the green one the run starts on and
-# the frozen one it ends up under. Both are hung the same way and stacked, so
-# the changeover at wave 30 is a crossfade rather than a swap -- see
-# _play_winter_change.
+# The three paintings of the same crossroads: the green one the run starts on,
+# the frozen one it goes under at wave 30, and the burning one past the dragon.
+# All three are hung the same way and stacked in order, so each changeover is a
+# crossfade rather than a swap -- see _play_winter_change and _play_lava_change.
 var env_sprite: TextureRect
 var winter_sprite: TextureRect
+var lava_sprite: TextureRect
 var lighting: Lighting
+
+# The ember map arrived spelled the way it is spelled on disk. Both spellings
+# are looked for rather than one being taken as correct, so the file can be
+# renamed later without this having to be found and changed with it.
+const LAVA_ART_IDS := ["environment_lava", "enviroment_lava"]
+
+func _lava_art_path() -> String:
+	for id in LAVA_ART_IDS:
+		var p: String = UnitDatabase.get_art_path(String(id))
+		if p != "":
+			return p
+	return ""
 
 func _build_background() -> void:
 	var bg := Polygon2D.new()
@@ -277,8 +345,18 @@ func _build_background() -> void:
 			winter_sprite.modulate = Color(1, 1, 1, 0)
 			lighting.add_graded(winter_sprite)
 
-		# Last into the window, so it lies over both paintings rather than under
-		# the one that has not come up yet.
+		# And the ember map over that one, waiting on the dragon. Added here
+		# rather than when it is needed so all three are hung by the same rule
+		# in the same frame: a layer built later would have to be positioned
+		# against an arena that has already been laid out around it.
+		var lava_art_path := _lava_art_path()
+		if lava_art_path != "":
+			lava_sprite = _add_env_layer(arena_clip, load(lava_art_path))
+			lava_sprite.modulate = Color(1, 1, 1, 0)
+			lighting.add_graded(lava_sprite)
+
+		# Last into the window, so it lies over all three paintings rather than
+		# under the ones that have not come up yet.
 		_build_map_ambience(arena_clip)
 	else:
 		var arena_fill := Polygon2D.new()
@@ -2455,8 +2533,10 @@ func _build_ui() -> void:
 		ARENA_AREA_RIGHT - ARENA_AREA_LEFT, ARENA_AREA_BOTTOM - ARENA_AREA_TOP))
 
 	# Below the flash so the cold wash lights the weather too, and below the HUD
-	# so nothing important is ever read through falling snow.
+	# so nothing important is ever read through falling snow. Only ever one of
+	# the two is emitting: the embers start on the beat the snow stops.
 	_build_snowfall(root)
+	_build_emberfall(root)
 
 	# Added first so it washes over the play field but stays under the HUD.
 	screen_flash = ColorRect.new()
@@ -2529,6 +2609,8 @@ func _build_ui() -> void:
 	_build_coin_chip(root)
 	_build_units_chip(root)
 	_build_winter_banner(root)
+	_build_lava_banner(root)
+	_build_retreat_ui(root)
 	_build_pause_ui(root)
 
 	_on_fortress_hp_changed(fortress.hp, fortress.max_hp)
@@ -3105,6 +3187,265 @@ func _format_coins(value: int) -> String:
 			out = "," + out
 	return out
 
+# ------------------------------------------------------------------- retreat
+#
+# The one way out of a run that is neither losing it nor throwing it away. The
+# fortress falling banks what the run earned; so does EXIT on the pause menu.
+# Neither is a decision -- with no reason to stop, the only move at wave 40 is
+# to stand there until the wall comes down, which is the opposite of one.
+#
+# Walking off the field on purpose pays a multiplier that climbs with the wave
+# (MetaManager.extract_multiplier) and, more to the point, lets the player keep
+# the units standing on it: whatever is alive when the button is pressed goes
+# into the pack and is there on the menu afterwards. So "one more block of ten"
+# is always worth something, and so is stopping -- which is the whole of the
+# decision this button exists to create.
+#
+# It is confirmed rather than immediate, and the confirmation shows the pack
+# it would bank. A button that ends the run under the player's thumb with no
+# warning is a button nobody presses twice.
+
+const RETREAT_BTN_SIZE := Vector2(196.0, 72.0)
+const RETREAT_BTN_GAP := 14.0
+
+var retreat_button: Button
+var retreat_panel: Control
+var retreat_essence_label: Label
+var retreat_list: VBoxContainer
+var retreat_list_note: Label
+
+func _build_retreat_ui(root: Control) -> void:
+	_build_retreat_panel(root)
+
+	# Directly under the pause button and against the same right margin, so the
+	# two read as one column of things that take the player out of the fight.
+	retreat_button = Button.new()
+	retreat_button.text = "RETREAT"
+	retreat_button.size = RETREAT_BTN_SIZE
+	retreat_button.position = Vector2(
+		VIEW_W - 24.0 - RETREAT_BTN_SIZE.x,
+		190.0 + PAUSE_BTN_SIZE + RETREAT_BTN_GAP)
+	retreat_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	UIStyle.apply_button_style(retreat_button, UIStyle.ACCENT_TEAL.darkened(0.12), 28, 20)
+	retreat_button.pressed.connect(_on_retreat_pressed)
+	root.add_child(retreat_button)
+
+const RETREAT_PANEL_SIZE := Vector2(940.0, 1120.0)
+
+func _build_retreat_panel(root: Control) -> void:
+	retreat_panel = Control.new()
+	retreat_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	retreat_panel.visible = false
+	# The tree is frozen while this is up, so everything on it has to keep
+	# running or none of its buttons answer.
+	retreat_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	root.add_child(retreat_panel)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.02, 0.04, 0.84)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	retreat_panel.add_child(dim)
+
+	var panel := Panel.new()
+	panel.size = RETREAT_PANEL_SIZE
+	# Centred on the arena rather than the screen, like every other plate here.
+	panel.position = Vector2(
+		(VIEW_W - RETREAT_PANEL_SIZE.x) / 2.0, ARENA_CENTER.y - RETREAT_PANEL_SIZE.y / 2.0)
+	panel.add_theme_stylebox_override("panel",
+		UIStyle.panel_box(UIStyle.PANEL_BG, UIStyle.ACCENT_TEAL, 30, 3))
+	retreat_panel.add_child(panel)
+
+	var title := Label.new()
+	title.text = "RETREAT?"
+	title.position = Vector2(0, 34)
+	title.size = Vector2(RETREAT_PANEL_SIZE.x, 74)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 60)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(title, UIStyle.ACCENT_TEAL, 8)
+	panel.add_child(title)
+
+	var sub := Label.new()
+	sub.text = "The run ends here and is banked for good. What is still standing comes home with you."
+	sub.position = Vector2(48, 112)
+	sub.size = Vector2(RETREAT_PANEL_SIZE.x - 96, 74)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD
+	sub.add_theme_font_size_override("font_size", 24)
+	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_body_text(sub, UIStyle.TEXT_MUTED)
+	panel.add_child(sub)
+
+	retreat_essence_label = Label.new()
+	retreat_essence_label.position = Vector2(0, 192)
+	retreat_essence_label.size = Vector2(RETREAT_PANEL_SIZE.x, 62)
+	retreat_essence_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	retreat_essence_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	retreat_essence_label.add_theme_font_size_override("font_size", 40)
+	retreat_essence_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(retreat_essence_label, UIStyle.ACCENT_GOLD, 6)
+	panel.add_child(retreat_essence_label)
+
+	var heading := Label.new()
+	heading.text = "YOU TAKE WITH YOU"
+	heading.position = Vector2(0, 266)
+	heading.size = Vector2(RETREAT_PANEL_SIZE.x, 44)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	heading.add_theme_font_size_override("font_size", 26)
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_body_text(heading, UIStyle.TEXT_MUTED)
+	panel.add_child(heading)
+
+	# Says so outright when the field is empty, rather than leaving a blank
+	# space the player has to work out the meaning of.
+	retreat_list_note = Label.new()
+	retreat_list_note.position = Vector2(48, 330)
+	retreat_list_note.size = Vector2(RETREAT_PANEL_SIZE.x - 96, 44)
+	retreat_list_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	retreat_list_note.visible = false
+	retreat_list_note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_body_text(retreat_list_note, UIStyle.TEXT_MUTED)
+	panel.add_child(retreat_list_note)
+
+	var scroll := ScrollContainer.new()
+	scroll.position = Vector2(40, 322)
+	scroll.size = Vector2(RETREAT_PANEL_SIZE.x - 80, RETREAT_PANEL_SIZE.y - 322 - 158)
+	panel.add_child(scroll)
+
+	retreat_list = VBoxContainer.new()
+	retreat_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	retreat_list.add_theme_constant_override("separation", 12)
+	scroll.add_child(retreat_list)
+
+	var btn_w := (RETREAT_PANEL_SIZE.x - 80.0 - 24.0) / 2.0
+	var btn_y := RETREAT_PANEL_SIZE.y - 130.0
+
+	var stay := Button.new()
+	stay.text = "STAY"
+	stay.position = Vector2(40, btn_y)
+	stay.size = Vector2(btn_w, 92)
+	UIStyle.apply_button_style(stay, UIStyle.ACCENT_BLUE, 34, 24)
+	stay.pressed.connect(_close_retreat)
+	panel.add_child(stay)
+
+	var go := Button.new()
+	go.text = "RETREAT"
+	go.position = Vector2(40 + btn_w + 24, btn_y)
+	go.size = Vector2(btn_w, 92)
+	UIStyle.apply_button_style(go, UIStyle.ACCENT_TEAL, 34, 24)
+	go.pressed.connect(_confirm_retreat)
+	panel.add_child(go)
+
+# Everything alive on the field, as the {"id", "level"} rows MetaManager stores.
+#
+# The hero is left out on purpose: it is lent to the run rather than earned by
+# it -- standing on the ring before the first piece drops, in a slot handed to
+# it rather than taken -- and a hero that could be carried home would be a hero
+# the player farms one run at a time.
+func _carried_units() -> Array:
+	var out: Array = []
+	for d in CombatManager.defenders:
+		if not is_instance_valid(d) or not d.is_alive():
+			continue
+		if UnitDatabase.is_hero(d.unit_id):
+			continue
+		out.append({"id": d.unit_id, "level": d.unit_level})
+	return out
+
+func _on_retreat_pressed() -> void:
+	if not GameManager.is_playing() or get_tree().paused:
+		return
+	_release_field_touch()
+	get_tree().paused = true
+	_refresh_retreat_panel()
+	retreat_panel.visible = true
+	_update_pause_button()
+
+func _refresh_retreat_panel() -> void:
+	var wave: int = WaveManager.current_wave
+	var mult: float = MetaManager.extract_multiplier(wave)
+	retreat_essence_label.text = "+%d ESSENCE   ×%.2f" % [_retreat_essence(wave, mult), mult]
+
+	for child in retreat_list.get_children():
+		child.queue_free()
+
+	var stacks: Array = MetaManager.group_units(_carried_units())
+	retreat_list_note.visible = stacks.is_empty()
+	retreat_list_note.text = "Nothing is standing on the field."
+	for stack in stacks:
+		retreat_list.add_child(_retreat_row(stack as Dictionary))
+
+# What the retreat would pay, worked out the same way MetaManager works it out
+# so the number on the button and the number banked can never disagree. It is
+# recomputed rather than asked for because asking would mean banking the run.
+func _retreat_essence(wave: int, mult: float) -> int:
+	var base: int = int(floor(wave / 2.0))
+	if wave >= 20:
+		base += 10
+	if wave >= 30:
+		base += 20
+	if _beat_dragon:
+		base += 50
+	return int(round(float(base) * mult))
+
+func _retreat_row(stack: Dictionary) -> Control:
+	var id: String = String(stack.get("id", ""))
+	var d: Dictionary = UnitDatabase.get_def(id)
+	var accent: Color = d.get("color", UIStyle.ACCENT_GOLD)
+
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UIStyle.card_box(accent))
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	card.add_child(row)
+
+	var count := Label.new()
+	count.text = "×%d" % int(stack.get("count", 1))
+	count.custom_minimum_size = Vector2(96, 0)
+	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	count.add_theme_font_size_override("font_size", 34)
+	UIStyle.apply_heading(count, accent, 5)
+	row.add_child(count)
+
+	var name_lbl := Label.new()
+	name_lbl.text = String(d.get("name", id))
+	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", 30)
+	UIStyle.apply_body_text(name_lbl, UIStyle.TEXT_LIGHT)
+	row.add_child(name_lbl)
+
+	var level := Label.new()
+	level.text = "LV %d" % int(stack.get("level", 1))
+	level.custom_minimum_size = Vector2(140, 0)
+	level.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	level.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	level.add_theme_font_size_override("font_size", 28)
+	UIStyle.apply_body_text(level, UIStyle.ACCENT_GOLD)
+	row.add_child(level)
+
+	return card
+
+func _close_retreat() -> void:
+	retreat_panel.visible = false
+	get_tree().paused = false
+	_update_pause_button()
+
+# The pack is stored before the run is banked, so a save written between the
+# two can never contain the essence without the units that were carried out
+# alongside it.
+func _confirm_retreat() -> void:
+	retreat_panel.visible = false
+	get_tree().paused = false
+	MusicPlayer.set_intensity(0.0)
+	MetaManager.add_to_inventory(_carried_units())
+	_bank_run(true)
+	get_tree().change_scene_to_file(MENU_SCENE)
+
 # ----------------------------------------------------------------- pause menu
 
 const PAUSE_BTN_SIZE := 96.0
@@ -3158,8 +3499,10 @@ func _on_pause_pressed() -> void:
 		return
 	_release_field_touch()
 	get_tree().paused = true
-	pause_button.visible = false
 	pause_menu.open()
+	# After the overlay is up rather than hiding the one button by hand: the
+	# retreat plate is on the same column and has to go with it.
+	_update_pause_button()
 
 func _resume_from_pause() -> void:
 	pause_menu.close()
@@ -3196,21 +3539,29 @@ func _exit_to_menu() -> void:
 # and the essence the defeat screen shows is the same figure this returns.
 var _run_banked: bool = false
 
-func _bank_run() -> int:
+func _bank_run(extracted: bool = false) -> int:
 	if _run_banked:
 		return 0
 	_run_banked = true
-	return MetaManager.record_run_end(WaveManager.current_wave, _beat_dragon)
+	return MetaManager.record_run_end(WaveManager.current_wave, _beat_dragon, extracted)
 
 # The button only makes sense during play: the upgrade screen and game over
 # already own the whole screen and pause the tree themselves.
 func _update_pause_button() -> void:
 	if pause_button == null:
 		return
-	var overlay_open: bool = pause_menu.visible or (shop_panel != null and shop_panel.visible)
+	# The blessing board is the one overlay that goes up while the run is still
+	# nominally playing -- it is shown before _begin_run() -- so it has to be
+	# named here or RETREAT and the pause key sit on top of it.
+	var overlay_open: bool = pause_menu.visible \
+		or (shop_panel != null and shop_panel.visible) \
+		or (retreat_panel != null and retreat_panel.visible) \
+		or (blessing_panel != null and blessing_panel.visible)
 	pause_button.visible = GameManager.is_playing() and not overlay_open
 	if shop_button != null:
 		shop_button.visible = GameManager.is_playing() and not overlay_open
+	if retreat_button != null:
+		retreat_button.visible = GameManager.is_playing() and not overlay_open
 	# Left to _update_hero_button to decide whether it has anything to show; all
 	# this settles is whether the screen belongs to something else.
 	_hero_button_allowed = GameManager.is_playing() and not overlay_open
@@ -3225,55 +3576,19 @@ func _on_game_state_changed(_new_state: int) -> void:
 
 # --------------------------------------------------------------- blessings
 #
-# Shown once, before the tray drops anything, and never again this run --
-# the same shape as the upgrade panel (dim, title, a stack of cards) rather
-# than a new visual language, because this is also a screen the player picks
-# one card out of and moves on from.
+# Shown once, before the tray drops anything, and never again this run -- on
+# the same painted plate the wave upgrade uses (see ui/ChoicePlate.gd), because
+# this is also a screen the player takes one card off and moves on from, and
+# two screens that do the one thing have no business looking like two.
 
-var blessing_panel: Control
-var blessing_cards: Array = []
+var blessing_panel: ChoicePlate
 var blessing_card_ids: Array = []
 
-const BLESSING_CARD_H := 250.0
-const BLESSING_CARD_TOP := 320.0
-const BLESSING_CARD_SPACING := 26.0
-const BLESSING_MAX_CARDS := 4
-
 func _build_blessing_panel(root: Control) -> void:
-	blessing_panel = Control.new()
-	blessing_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	blessing_panel.visible = false
-	blessing_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	blessing_panel = ChoicePlate.new()
+	blessing_panel.build(Vector2(VIEW_W, VIEW_H))
+	blessing_panel.picked.connect(_on_blessing_card_pressed)
 	root.add_child(blessing_panel)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.82)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	blessing_panel.add_child(dim)
-
-	var title := Label.new()
-	title.text = "CHOOSE A BLESSING"
-	title.add_theme_font_size_override("font_size", 46)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.position = Vector2(40, 190)
-	title.size = Vector2(VIEW_W - 80, 70)
-	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_heading(title, UIStyle.ACCENT_TEAL)
-	blessing_panel.add_child(title)
-
-	blessing_cards = []
-	blessing_card_ids = []
-	for i in range(BLESSING_MAX_CARDS):
-		var card := Button.new()
-		card.size = Vector2(VIEW_W - 120, BLESSING_CARD_H)
-		card.position = Vector2(60, BLESSING_CARD_TOP + i * (BLESSING_CARD_H + BLESSING_CARD_SPACING))
-		card.add_theme_font_size_override("font_size", 28)
-		card.pressed.connect(_on_blessing_card_pressed.bind(i))
-		UIStyle.apply_card_style(card, UIStyle.ACCENT_TEAL)
-		blessing_panel.add_child(card)
-		blessing_cards.append(card)
-		blessing_card_ids.append("")
 
 # A random sample rather than the whole pool every time, the same way the
 # upgrade screen never shows every upgrade at once -- three ordinarily, four
@@ -3284,78 +3599,49 @@ func _show_blessing_selection() -> void:
 	var card_count: int = 4 if MetaManager.has_tier4() else 3
 	var offered: Array = pool.slice(0, mini(card_count, pool.size()))
 
-	for i in range(blessing_cards.size()):
-		var card: Button = blessing_cards[i]
-		if i < offered.size():
-			var id: String = offered[i]
-			var d: Dictionary = BlessingManager.get_def(id)
-			card.text = "%s %s\n\n%s" % [d.get("icon", ""), d.get("name", ""), d.get("desc", "")]
-			card.visible = true
-			blessing_card_ids[i] = id
-		else:
-			card.visible = false
-			blessing_card_ids[i] = ""
+	blessing_card_ids = []
+	var cards: Array = []
+	for id in offered:
+		var d: Dictionary = BlessingManager.get_def(String(id))
+		blessing_card_ids.append(String(id))
+		cards.append({
+			"name": String(d.get("name", id)),
+			"desc": String(d.get("desc", "")),
+			"art": BlessingManager.get_art_path(String(id)),
+			"accent": BlessingManager.accent(String(id)),
+			# Nothing to climb: a blessing is taken once and kept, so the row
+			# the upgrade cards spend on Lv N -> N+1 goes to the wording.
+			"level": -1,
+			"rare": false,
+		})
 
-	blessing_panel.visible = true
+	# The plate's own title and footer both say upgrade, so both are rewritten;
+	# everything else the painting says is true on this screen too.
+	blessing_panel.open({
+		"title": "CHOOSE A BLESSING",
+		"subtitle": "THE RUN BEGINS",
+		"footer": "Tap a blessing to select",
+	}, cards)
 	get_tree().paused = true
+	_update_pause_button()
 
 func _on_blessing_card_pressed(index: int) -> void:
+	if index < 0 or index >= blessing_card_ids.size():
+		return
 	var id: String = blessing_card_ids[index]
 	if id == "":
 		return
 	BlessingManager.apply(id)
-
-	var card: Button = blessing_cards[index]
-	var tw := create_tween()
-	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tw.tween_property(card, "scale", Vector2(1.05, 1.05), 0.12)
-	tw.tween_callback(func() -> void:
-		card.scale = Vector2.ONE
-		blessing_panel.visible = false
-		get_tree().paused = false
-		_begin_run()
-	)
+	blessing_panel.close()
+	get_tree().paused = false
+	_begin_run()
+	_update_pause_button()
 
 func _build_upgrade_panel(root: Control) -> void:
-	upgrade_panel = Control.new()
-	upgrade_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	upgrade_panel.visible = false
-	upgrade_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	upgrade_panel = ChoicePlate.new()
+	upgrade_panel.build(Vector2(VIEW_W, VIEW_H))
+	upgrade_panel.picked.connect(_on_upgrade_card_pressed)
 	root.add_child(upgrade_panel)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.78)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	upgrade_panel.add_child(dim)
-
-	upgrade_title = Label.new()
-	upgrade_title.text = "CHOOSE AN UPGRADE"
-	upgrade_title.add_theme_font_size_override("font_size", 48)
-	upgrade_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	upgrade_title.position = Vector2(40, 260)
-	upgrade_title.size = Vector2(VIEW_W - 80, 80)
-	upgrade_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UIStyle.apply_heading(upgrade_title, UIStyle.ACCENT_GOLD)
-	upgrade_panel.add_child(upgrade_title)
-
-	upgrade_cards = []
-	var card_h := 300.0
-	var spacing := 40.0
-	var top := 420.0
-	# Always built to the ceiling (a fourth seat bought once, permanently,
-	# from the menu shop) and shown down to whatever the run actually has --
-	# the same "build the max, hide down to the real count" shape the
-	# blessing panel already uses.
-	for i in range(UPGRADE_CARD_SLOTS):
-		var card := Button.new()
-		card.size = Vector2(VIEW_W - 120, card_h)
-		card.position = Vector2(60, top + i * (card_h + spacing))
-		card.add_theme_font_size_override("font_size", 30)
-		card.pressed.connect(_on_upgrade_card_pressed.bind(i))
-		UIStyle.apply_card_style(card, UIStyle.ACCENT_GOLD)
-		upgrade_panel.add_child(card)
-		upgrade_cards.append(card)
 
 # ------------------------------------------------------- merge upgrade screen
 #
@@ -3556,14 +3842,117 @@ func _play_winter_change() -> void:
 # The warm flash belongs to a merge; this one is the cold coming in, so it is
 # blue, wider and much slower to clear.
 func _flash_cold() -> void:
+	_flash_phase(Color(0.62, 0.82, 1.0, 0.40))
+
+# And this one is the ground opening, so it is orange and brighter still. Same
+# shape, same duration -- the two changeovers should land with the same weight
+# and differ only in colour.
+func _flash_hot() -> void:
+	_flash_phase(Color(1.0, 0.56, 0.22, 0.46))
+
+func _flash_phase(color: Color) -> void:
 	if screen_flash == null:
 		return
 	if pause_menu != null and not pause_menu.screen_fx_enabled:
 		return
-	screen_flash.color = Color(0.62, 0.82, 1.0, 0.40)
+	screen_flash.color = color
 	var tw := create_tween()
 	tw.tween_property(screen_flash, "color:a", 0.0, 0.9) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+# ------------------------------------------------------------ ember changeover
+#
+# The dragon falls on wave 50 and the snow goes out from under it: the frozen
+# crossroads is the last one fought on ice, and everything after this is fought
+# on the ember map.
+#
+# Built to the same shape as the winter changeover on purpose. The map does not
+# cut -- all three paintings are already hung one over the other from the same
+# crossroads (see _add_env_layer) -- so this is the top one coming up from
+# nothing while the light, the fall and the weather all turn over the same beat.
+#
+# The one difference is the banner. Winter has a painting of its own
+# (art/winter_coming.png) and this does not, so the announcement is set rather
+# than drawn -- the same procedural heading the modifier banner and the overflow
+# count already use, scaled up to the size the painted one is shown at.
+const LAVA_FADE := 2.4
+const LAVA_HOLD := 1.0
+const LAVA_BANNER_TEXT := "THE EMBERS RISE"
+
+var lava_banner: Label
+var _lava_done: bool = false
+
+func _build_lava_banner(root: Control) -> void:
+	lava_banner = Label.new()
+	lava_banner.text = LAVA_BANNER_TEXT
+	lava_banner.size = Vector2(VIEW_W, 200.0)
+	# Centred on the arena rather than the screen, for the same reason every
+	# other plate here is: the middle of the screen is the top of the tray.
+	lava_banner.position = Vector2(0.0, ARENA_CENTER.y - 100.0)
+	lava_banner.pivot_offset = Vector2(VIEW_W, 200.0) / 2.0
+	lava_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lava_banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lava_banner.add_theme_font_size_override("font_size", 96)
+	lava_banner.modulate = Color(1, 1, 1, 0)
+	lava_banner.visible = false
+	lava_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UIStyle.apply_heading(lava_banner, Color(1.0, 0.62, 0.26), 14)
+	root.add_child(lava_banner)
+
+func _play_lava_change() -> void:
+	if _lava_done:
+		_show_upgrade_selection()
+		return
+	_lava_done = true
+
+	# Whatever the wave was still announcing goes now, the same way it does at
+	# the freeze: the two plates are drawn in the same place.
+	_hide_wave_banner()
+
+	_flash_hot()
+	lighting.to_lava(LAVA_FADE)
+	# The snow does not vanish -- what is already in the air finishes falling --
+	# but nothing new is emitted, so the sky clears over roughly the same beat
+	# the ground does.
+	if snowfall != null:
+		snowfall.emitting = false
+	if emberfall != null:
+		emberfall.emitting = true
+
+	var tw := create_tween()
+
+	if lava_sprite != null:
+		tw.tween_property(lava_sprite, "modulate:a", 1.0, LAVA_FADE) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		# The light the field throws changes with the field, handed over at the
+		# halfway point so the bodies warm over the same beat the ground does.
+		tw.parallel().tween_callback(
+			_light_from.bind(lava_sprite, lava_sprite.get_parent())) \
+			.set_delay(LAVA_FADE * 0.5)
+	else:
+		tw.tween_interval(LAVA_FADE)
+
+	# Same fall off the same cliff, running something else now.
+	if map_waterfall != null:
+		tw.parallel().tween_method(map_waterfall.set_ember, 0.0, 1.0, LAVA_FADE)
+
+	if lava_banner == null:
+		tw.tween_callback(_show_upgrade_selection)
+		return
+
+	lava_banner.visible = true
+	lava_banner.modulate = Color(1, 1, 1, 0)
+	lava_banner.scale = Vector2(0.72, 0.72)
+	tw.parallel().tween_property(lava_banner, "modulate:a", 1.0, 0.35)
+	tw.parallel().tween_property(lava_banner, "scale", Vector2.ONE, 0.7) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	tw.tween_interval(LAVA_HOLD)
+	tw.tween_property(lava_banner, "modulate:a", 0.0, 0.45)
+	tw.tween_callback(func() -> void:
+		lava_banner.visible = false
+		_show_upgrade_selection()
+	)
 
 # ------------------------------------------------------------------- snowfall
 #
@@ -3578,13 +3967,7 @@ const SNOW_LIFETIME := 8.0
 var snowfall: CPUParticles2D
 
 func _build_snowfall(root: Control) -> void:
-	var clip := Control.new()
-	clip.position = Vector2(ARENA_AREA_LEFT, ARENA_AREA_TOP)
-	clip.size = Vector2(
-		ARENA_AREA_RIGHT - ARENA_AREA_LEFT, ARENA_AREA_BOTTOM - ARENA_AREA_TOP)
-	clip.clip_contents = true
-	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(clip)
+	var clip := _arena_window(root)
 
 	snowfall = CPUParticles2D.new()
 	snowfall.texture = FxUtil.dot_texture()
@@ -3619,6 +4002,70 @@ func _build_snowfall(root: Control) -> void:
 	ramp.add_point(0.80, Color(0.90, 0.96, 1.0, 0.9))
 	snowfall.color_ramp = ramp
 	clip.add_child(snowfall)
+
+# ------------------------------------------------------------------- emberfall
+#
+# The weather for the last phase, and the snow's opposite in every way that
+# matters: it comes off the ground rather than out of the sky, it goes up, and
+# it is thin where the snow is thick. Same window, same rule about staying off
+# the merge tray -- a tray painted before the fight has no business catching
+# sparks through its own frame.
+#
+# Far fewer particles than the snow, and slower. Snow is weather the player is
+# fighting in; embers are the ground the player is fighting on breathing, and a
+# blizzard of them would read as a screen effect rather than as a place.
+
+const EMBER_AMOUNT := 40
+const EMBER_LIFETIME := 6.0
+
+var emberfall: CPUParticles2D
+
+func _build_emberfall(root: Control) -> void:
+	var clip := _arena_window(root)
+
+	emberfall = CPUParticles2D.new()
+	emberfall.texture = FxUtil.dot_texture()
+	emberfall.amount = EMBER_AMOUNT
+	emberfall.lifetime = EMBER_LIFETIME
+	emberfall.emitting = false
+	# Off the whole floor of the window rather than a strip: a spark is lifting
+	# off whatever ground happens to be under it, so it starts everywhere.
+	emberfall.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	emberfall.emission_rect_extents = Vector2(clip.size.x / 2.0, clip.size.y / 2.0)
+	emberfall.position = clip.size / 2.0
+	emberfall.direction = Vector2.UP
+	emberfall.spread = 22.0
+	emberfall.initial_velocity_min = 26.0
+	emberfall.initial_velocity_max = 62.0
+	# Upward, so a spark keeps climbing rather than arcing over and falling back
+	# -- what lifts these is the heat coming off the rock, not a throw.
+	emberfall.gravity = Vector2(8.0, -18.0)
+	emberfall.orbit_velocity_min = -0.05
+	emberfall.orbit_velocity_max = 0.05
+	emberfall.scale_amount_min = 1.4
+	emberfall.scale_amount_max = 3.4
+	# Struck bright, cooling to red on the way up and gone before the top of the
+	# window, so no spark is ever seen being cut off by the edge of it.
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(1.0, 0.86, 0.46, 0))
+	ramp.set_color(1, Color(0.86, 0.20, 0.08, 0))
+	ramp.add_point(0.12, Color(1.0, 0.80, 0.38, 1.0))
+	ramp.add_point(0.70, Color(1.0, 0.46, 0.16, 0.75))
+	emberfall.color_ramp = ramp
+	clip.add_child(emberfall)
+
+# The window the fight is seen through, as a control that clips whatever is put
+# inside it. Both weathers hang in one of these, which is what keeps flakes and
+# sparks in front of the soldiers and off the tray.
+func _arena_window(root: Control) -> Control:
+	var clip := Control.new()
+	clip.position = Vector2(ARENA_AREA_LEFT, ARENA_AREA_TOP)
+	clip.size = Vector2(
+		ARENA_AREA_RIGHT - ARENA_AREA_LEFT, ARENA_AREA_BOTTOM - ARENA_AREA_TOP)
+	clip.clip_contents = true
+	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(clip)
+	return clip
 
 # --------------------------------------------------------------- defeat panel
 #
@@ -3755,10 +4202,10 @@ func _on_wave_started(wave_number: int) -> void:
 	# and that one wave gets to skip it.
 	_set_wave_number(wave_plate, wave_number)
 
-	# Wave 30 is the golem's, and it ends in the changeover. Its plate is left
-	# off entirely so nothing of the wave's own is still on the screen when
-	# WINTER HAS COME drops into the same place.
-	if wave_number == WaveManager.WINTER_WAVE:
+	# Wave 30 is the golem's and wave 50 the dragon's, and each ends in a
+	# changeover. Their plates are left off entirely so nothing of the wave's
+	# own is still on the screen when the announcement drops into the same place.
+	if wave_number == WaveManager.WINTER_WAVE or wave_number == WaveManager.LAVA_WAVE:
 		_hide_wave_banner()
 		return
 
@@ -3825,11 +4272,14 @@ func _on_wave_cleared(wave_number: int) -> void:
 			MetaManager.grant_achievement("storm_weathered")
 	if wave_number == WaveManager.WINTER_WAVE and _run_start_ms > 0:
 		MetaManager.record_wave30_time((Time.get_ticks_msec() - _run_start_ms) / 1000.0)
-	# The golem's wave pays out like any other tenth, but the changeover is the
-	# reward the player actually came for, so it goes first and hands over to the
-	# upgrade screen when it is done.
+	# The golem's wave and the dragon's pay out like any other tenth, but the
+	# changeover each ends in is the reward the player actually came for, so it
+	# goes first and hands over to the upgrade screen when it is done.
 	if wave_number == WaveManager.WINTER_WAVE:
 		_play_winter_change()
+		return
+	if wave_number == WaveManager.LAVA_WAVE:
+		_play_lava_change()
 		return
 	if wave_number % 10 == 0:
 		_show_upgrade_selection()
@@ -3845,29 +4295,32 @@ func _show_upgrade_selection() -> void:
 		return
 	var choice_count: int = UPGRADE_CARD_SLOTS if MetaManager.fourth_card_unlocked else UPGRADE_CHOICES
 	var choices: Array = UpgradeManager.get_random_choices(choice_count)
-	for i in range(upgrade_cards.size()):
-		var card: Button = upgrade_cards[i]
-		if i < choices.size():
-			var id: String = choices[i]
-			var d: Dictionary = UpgradeManager.get_def(id)
-			var level: int = UpgradeManager.get_level(id)
-			var is_rare: bool = String(d.get("rarity", "common")) == "rare"
-			var name_line: String = ("✦ RARE ✦\n" if is_rare else "") + "%s %s" % [d.get("icon", ""), d.get("name", "")]
-			card.text = "%s\nLv %d -> %d\n%s" % [name_line, level, level + 1, d.get("desc", "")]
-			card.visible = true
-			var accent: Color = UIStyle.ACCENT_GOLD if is_rare else UIStyle.category_color(d.get("category", "general"))
-			UIStyle.apply_card_style(card, accent)
-			upgrade_card_ids[i] = id
-		else:
-			card.visible = false
-			upgrade_card_ids[i] = ""
 
-	upgrade_panel.visible = true
-	upgrade_title.text = "CHOOSE AN UPGRADE"
+	upgrade_card_ids = []
+	var cards: Array = []
+	for id in choices:
+		var d: Dictionary = UpgradeManager.get_def(String(id))
+		var is_rare: bool = String(d.get("rarity", "common")) == "rare"
+		upgrade_card_ids.append(String(id))
+		cards.append({
+			"name": String(d.get("name", id)),
+			"desc": String(d.get("desc", "")),
+			"art": UpgradeManager.get_art_path(String(id)),
+			"accent": UIStyle.ACCENT_GOLD if is_rare \
+				else UIStyle.category_color(String(d.get("category", "general"))),
+			"level": UpgradeManager.get_level(String(id)),
+			"rare": is_rare,
+		})
+
+	# The plate already says CHOOSE AN UPGRADE and how to answer it; the only
+	# line on it that has to know anything about this run is the wave.
+	upgrade_panel.open({"subtitle": "WAVE %d COMPLETE" % WaveManager.current_wave}, cards)
 	GameManager.enter_upgrade_selection()
 	get_tree().paused = true
 
 func _on_upgrade_card_pressed(index: int) -> void:
+	if index < 0 or index >= upgrade_card_ids.size():
+		return
 	var id: String = upgrade_card_ids[index]
 	if id == "":
 		return
@@ -3879,17 +4332,10 @@ func _on_upgrade_card_pressed(index: int) -> void:
 		"fortress_heal":
 			fortress.heal_percent(FORTRESS_BASE_HP, 0.2)
 
-	var card: Button = upgrade_cards[index]
-	var tw := create_tween()
-	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-	tw.tween_property(card, "scale", Vector2(1.05, 1.05), 0.12)
-	tw.tween_callback(func() -> void:
-		card.scale = Vector2.ONE
-		upgrade_panel.visible = false
-		get_tree().paused = false
-		GameManager.resume_playing()
-		WaveManager.resume_after_upgrade()
-	)
+	upgrade_panel.close()
+	get_tree().paused = false
+	GameManager.resume_playing()
+	WaveManager.resume_after_upgrade()
 
 
 

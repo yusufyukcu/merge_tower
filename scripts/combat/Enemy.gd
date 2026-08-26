@@ -628,6 +628,18 @@ func _build_visual(d: Dictionary) -> void:
 		# which is what the altitude and the gap between the two are saying.
 		_build_shadow(radius, (_visual as Sprite2D))
 		add_child(_visual)
+		# Registered as a frame rather than left as a loose texture, even though
+		# the drawing is the one _build_sprite just put up and the offset works
+		# out to zero. Turning is refused while nothing is registered, so a body
+		# that was never told which frame it is standing in walks the whole way
+		# in without ever facing its heading -- and then snaps around the first
+		# time it swings, which is when the attack row finally registers one.
+		# Invisible on anything drawn front-on; on the wolf, which is drawn in
+		# pure profile, it is the animal running in backwards.
+		if not _frames.is_empty():
+			_apply_frame(_frames, 0)
+		elif not _fly_frames.is_empty():
+			_apply_frame(_fly_frames, 0)
 	else:
 		var poly := Polygon2D.new()
 		poly.polygon = _circle_points(radius, 12)

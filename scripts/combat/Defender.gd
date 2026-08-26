@@ -770,6 +770,9 @@ func _apply_upgrades(id: String) -> void:
 			attack_interval /= m.get("mage_aspd", 1.0)
 	damage *= m.get("defender_damage", 1.0)
 	damage *= BlessingManager.defender_damage_mult()
+	# The UNIT BOOST bought off the menu shop, if this run is the one it was
+	# bought for. 1.0 otherwise, which is exactly nothing.
+	damage *= MetaManager.run_damage_mult()
 
 # --------------------------------------------------------------- experience
 #
@@ -852,6 +855,23 @@ func _leave_skull(at: Vector2, size: float, enemy_id: String) -> void:
 	mark.global_position = at
 	mark.play(size, enemy_id)
 	CombatManager.add_skull(mark)
+
+# A body that arrives already grown. The two units carried in off the menu's
+# plaques come back at the level they left the field on, so a knight brought
+# home at level 6 stands up as a level 6 knight rather than as a fresh one.
+#
+# Only the level travels, not the experience: what a level cost is already
+# spent, and the part-filled bar towards the next one is the sort of
+# book-keeping nobody would ever notice was missing.
+func start_at_level(level: int) -> void:
+	unit_level = clampi(level, 1, MAX_LEVEL)
+	xp = 0
+	# Not healed up: these stats are being set for the first time rather than
+	# raised, so the body is filled outright afterwards instead of being topped
+	# up by the difference.
+	_apply_level(false)
+	hp = max_hp
+	_check_ascension()
 
 func gain_xp(amount: int) -> void:
 	if amount <= 0 or hp <= 0.0 or is_max_level():

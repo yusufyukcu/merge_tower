@@ -31,6 +31,7 @@ MusicPlayer="*res://scripts/autoload/MusicPlayer.gd"
 Sfx="*res://scripts/autoload/Sfx.gd"
 BlessingManager="*res://scripts/autoload/BlessingManager.gd"
 MetaManager="*res://scripts/autoload/MetaManager.gd"
+DevShot="*res://scripts/dev/DevShot.gd"
 
 [display]
 

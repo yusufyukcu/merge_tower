@@ -8,31 +8,37 @@ extends Node
 # now), so Main.gd special-cases those two ids after calling apply().
 
 const DEFS := {
-	"wood_spawn": {"name": "WOODCUTTER", "category": "general", "desc": "Wood spawn chance +20%", "icon": "🪵", "max_level": 3},
-	"bow_spawn": {"name": "FLETCHER", "category": "general", "desc": "Bow spawn chance +20%", "icon": "🏹", "max_level": 3},
-	"crystal_spawn": {"name": "ARCANIST", "category": "general", "desc": "Crystal spawn chance +20%", "icon": "🔮", "max_level": 3},
-	"all_spawn_luck": {"name": "FOUR-LEAF CLOVER", "category": "general", "desc": "Rare branches catch up 10% faster", "icon": "🍀", "max_level": 3},
-	"rare_merge": {"name": "LUCKY MERGE", "category": "general", "desc": "+10% chance a merge produces a bonus unit", "icon": "✨", "max_level": 3, "rarity": "rare"},
+	"wood_spawn": {"name": "WOODCUTTER", "category": "general", "desc": "Wood spawn chance +20%", "icon": "🪵", "art": "wood", "max_level": 3},
+	"bow_spawn": {"name": "FLETCHER", "category": "general", "desc": "Bow spawn chance +20%", "icon": "🏹", "art": "bow", "max_level": 3},
+	"crystal_spawn": {"name": "ARCANIST", "category": "general", "desc": "Crystal spawn chance +20%", "icon": "🔮", "art": "crystal", "max_level": 3},
+	"all_spawn_luck": {"name": "FOUR-LEAF CLOVER", "category": "general", "desc": "Rare branches catch up 10% faster", "icon": "🍀", "art": "emerald", "max_level": 3},
+	"rare_merge": {"name": "LUCKY MERGE", "category": "general", "desc": "+10% chance a merge produces a bonus unit", "icon": "✨", "art": "fx_merge_critical", "max_level": 3, "rarity": "rare"},
 
-	"warrior_hp": {"name": "TOUGH TRAINING", "category": "warrior", "desc": "Warrior HP +20%", "icon": "⚔️", "max_level": 3},
-	"warrior_damage": {"name": "SHARPENED BLADES", "category": "warrior", "desc": "Warrior damage +20%", "icon": "⚔️", "max_level": 3},
-	"warrior_aspd": {"name": "RAPID STRIKES", "category": "warrior", "desc": "Warrior attack speed +15%", "icon": "⚔️", "max_level": 3},
-	"knight_hp": {"name": "REINFORCED ARMOR", "category": "warrior", "desc": "Knight HP +25%", "icon": "🛡️", "max_level": 3, "rarity": "rare"},
-	"knight_damage": {"name": "HEAVY STRIKES", "category": "warrior", "desc": "Knight damage +25%", "icon": "🛡️", "max_level": 3, "rarity": "rare"},
+	"warrior_hp": {"name": "TOUGH TRAINING", "category": "warrior", "desc": "Warrior HP +20%", "icon": "⚔️", "art": "warrior", "max_level": 3},
+	"warrior_damage": {"name": "SHARPENED BLADES", "category": "warrior", "desc": "Warrior damage +20%", "icon": "⚔️", "art": "warrior", "max_level": 3},
+	"warrior_aspd": {"name": "RAPID STRIKES", "category": "warrior", "desc": "Warrior attack speed +15%", "icon": "⚔️", "art": "hoplite", "max_level": 3},
+	"knight_hp": {"name": "REINFORCED ARMOR", "category": "warrior", "desc": "Knight HP +25%", "icon": "🛡️", "art": "knight", "max_level": 3, "rarity": "rare"},
+	"knight_damage": {"name": "HEAVY STRIKES", "category": "warrior", "desc": "Knight damage +25%", "icon": "🛡️", "art": "armored_knight", "max_level": 3, "rarity": "rare"},
 
-	"archer_damage": {"name": "RAZOR ARROWS", "category": "archer", "desc": "Archer damage +20%", "icon": "🏹", "max_level": 3},
-	"archer_aspd": {"name": "RAPID FIRE", "category": "archer", "desc": "Archer attack speed +20%", "icon": "🏹", "max_level": 3},
-	"archer_range": {"name": "EAGLE EYE", "category": "archer", "desc": "Archer/Master Archer range +20%", "icon": "🏹", "max_level": 3},
-	"master_archer_damage": {"name": "PRECISION SHOT", "category": "archer", "desc": "Master Archer damage +25%", "icon": "🎯", "max_level": 3, "rarity": "rare"},
+	"archer_damage": {"name": "RAZOR ARROWS", "category": "archer", "desc": "Archer damage +20%", "icon": "🏹", "art": "archer", "max_level": 3},
+	"archer_aspd": {"name": "RAPID FIRE", "category": "archer", "desc": "Archer attack speed +20%", "icon": "🏹", "art": "bow", "max_level": 3},
+	"archer_range": {"name": "EAGLE EYE", "category": "archer", "desc": "Archer/Master Archer range +20%", "icon": "🏹", "art": "elite_ranger", "max_level": 3},
+	"master_archer_damage": {"name": "PRECISION SHOT", "category": "archer", "desc": "Master Archer damage +25%", "icon": "🎯", "art": "master_archer", "max_level": 3, "rarity": "rare"},
 
-	"mage_damage": {"name": "ARCANE POWER", "category": "mage", "desc": "Mage damage +25%", "icon": "🔮", "max_level": 3, "rarity": "rare"},
-	"mage_aoe": {"name": "WIDER BLAST", "category": "mage", "desc": "Mage AoE radius +20%", "icon": "💥", "max_level": 3},
-	"mage_aspd": {"name": "QUICK CASTING", "category": "mage", "desc": "Mage attack speed +15%", "icon": "🔮", "max_level": 3},
+	"mage_damage": {"name": "ARCANE POWER", "category": "mage", "desc": "Mage damage +25%", "icon": "🔮", "art": "archmage", "max_level": 3, "rarity": "rare"},
+	"mage_aoe": {"name": "WIDER BLAST", "category": "mage", "desc": "Mage AoE radius +20%", "icon": "💥", "art": "crystal", "max_level": 3},
+	"mage_aspd": {"name": "QUICK CASTING", "category": "mage", "desc": "Mage attack speed +15%", "icon": "🔮", "art": "mage", "max_level": 3},
 
-	"fortress_max_hp": {"name": "REINFORCED WALLS", "category": "fortress", "desc": "Fortress maximum HP +20", "icon": "🏰", "max_level": 3},
-	"fortress_heal": {"name": "EMERGENCY REPAIRS", "category": "fortress", "desc": "Heal fortress 20% of max HP now", "icon": "🧱", "max_level": 3},
-	"defender_damage": {"name": "WAR HORN", "category": "fortress", "desc": "All defender damage +10%", "icon": "📯", "max_level": 3, "rarity": "rare"},
+	"fortress_max_hp": {"name": "REINFORCED WALLS", "category": "fortress", "desc": "Fortress maximum HP +20", "icon": "🏰", "art": "castle_3", "max_level": 3},
+	"fortress_heal": {"name": "EMERGENCY REPAIRS", "category": "fortress", "desc": "Heal fortress 20% of max HP now", "icon": "🧱", "art": "icon_heart", "max_level": 3},
+	"defender_damage": {"name": "WAR HORN", "category": "fortress", "desc": "All defender damage +10%", "icon": "📯", "art": "paladin", "max_level": 3, "rarity": "rare"},
 }
+
+# The picture the upgrade screen puts on a card. Kept beside the wording rather
+# than in the screen that draws it, so a new upgrade arrives with its own face.
+func get_art_path(id: String) -> String:
+	var name: String = String(DEFS.get(id, {}).get("art", ""))
+	return "res://art/%s.png" % name if name != "" else ""
 
 var levels: Dictionary = {}
 var mult: Dictionary = {}

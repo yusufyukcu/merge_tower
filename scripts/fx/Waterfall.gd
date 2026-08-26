@@ -202,5 +202,16 @@ func _process(delta: float) -> void:
 
 # The snow does not stop the fall -- the winter painting still has it running --
 # but it puts it in colder water. 0 is the green map, 1 the frozen one.
+const FROST_TINT := Color(0.74, 0.88, 1.06)
+
 func set_frost(t: float) -> void:
-	modulate = Color(1, 1, 1).lerp(Color(0.74, 0.88, 1.06), clampf(t, 0.0, 1.0))
+	modulate = Color(1, 1, 1).lerp(FROST_TINT, clampf(t, 0.0, 1.0))
+
+# Past the dragon it is not water at all. The ember painting draws the same
+# fall coming off the same cliff in molten rock, so this walks the tint on from
+# wherever the frost left it rather than from white -- by the time this is ever
+# called the fall has been frozen for twenty waves.
+const EMBER_TINT := Color(1.30, 0.58, 0.26)
+
+func set_ember(t: float) -> void:
+	modulate = FROST_TINT.lerp(EMBER_TINT, clampf(t, 0.0, 1.0))

@@ -292,23 +292,55 @@ const DEFS := {
 	},
 }
 
+# The six merge branches, deepest tier last -- what the collection room counts
+# itself against, and the only place the branches are written down in order.
+const MERGE_BRANCHES := [
+	["warrior", "knight", "paladin"],
+	["archer", "master_archer", "elite_ranger"],
+	["apprentice_mage", "mage", "archmage"],
+	["hoplite", "veteran_hoplite", "elite_hoplite"],
+	["vine_mage", "elder_vine_mage", "ancient_vine_mage"],
+	["shaman", "elder_shaman", "great_shaman"],
+]
+
 # The roster, in the order the menu offers it. Kept as its own list rather than
 # filtered out of DEFS, so the order on the hero shelf is a decision and not
 # whatever order a dictionary happens to iterate in.
+# The dartmaster leads because he is the one the player already owns -- see
+# MetaManager.STARTER_HERO -- and a shelf that opens on six locked rows and the
+# only usable one buried in the middle reads as a shop rather than a roster.
 const HERO_IDS := [
-	"hero_void_master", "hero_aurelia", "hero_lumen_strike",
-	"hero_windmaster", "hero_zombie_lord", "hero_venom_dartmaster",
+	"hero_venom_dartmaster", "hero_void_master", "hero_aurelia",
+	"hero_lumen_strike", "hero_windmaster", "hero_zombie_lord",
 	"hero_cronomancer",
 ]
 
 func is_hero(id: String) -> bool:
 	return bool(DEFS.get(id, {}).get("is_hero", false))
 
-# The picture the menu shows on the shelf: the framed portrait off the hero's
-# own design sheet, and "" for anything that has none.
+# Every mergeable body at one merge tier, heroes left out -- what a unit chest
+# on the menu shop's shelf draws from. Read off DEFS rather than written out a
+# second time, so a branch added there turns up in the chests by itself.
+func units_of_tier(tier: int) -> Array:
+	var out: Array = []
+	for id in DEFS.keys():
+		var d: Dictionary = DEFS[id]
+		if not bool(d.get("is_unit", false)) or bool(d.get("is_hero", false)):
+			continue
+		if int(d.get("level", 0)) == tier:
+			out.append(id)
+	return out
+
+# The picture the menu shows on the shelf and on the plaque beside the BATTLE
+# plate. The painted portrait off art/hero_page.png comes first -- that is the
+# face the hero shelf is drawn around, and the plaque showing a different one of
+# the same hero would read as two heroes. The design-sheet face is the fallback
+# for anyone the page has no row for, and "" for anyone with neither.
 func get_hero_face(id: String) -> String:
-	var path := "res://art/%s_face.png" % id
-	return path if ResourceLoader.exists(path) else ""
+	for path in ["res://art/%s_portrait.png" % id, "res://art/%s_face.png" % id]:
+		if ResourceLoader.exists(path):
+			return path
+	return ""
 
 # "reward" is the gold a kill drops, roughly tracking how long the enemy takes
 # to bring down rather than its raw HP, so slow armored types stay worth it.

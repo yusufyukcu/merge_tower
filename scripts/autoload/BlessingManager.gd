@@ -12,47 +12,69 @@ extends Node
 
 const DEFS := {
 	"woodland_oath": {
-		"name": "WOODLAND OATH", "icon": "🌲",
+		"name": "WOODLAND OATH", "icon": "🌲", "art": "wood",
 		"desc": "Wood drops +55%, the other two branches -20%. Warriors start a level ahead.",
 		"branch_bias": {"wood": 1.55, "bow": 0.8, "crystal": 0.8},
 		"seed_upgrade": "warrior_hp",
 	},
 	"rangers_pact": {
-		"name": "RANGER'S PACT", "icon": "🏹",
+		"name": "RANGER'S PACT", "icon": "🏹", "art": "bow",
 		"desc": "Bow drops +55%, the other two branches -20%. Archers start a level ahead.",
 		"branch_bias": {"bow": 1.55, "wood": 0.8, "crystal": 0.8},
 		"seed_upgrade": "archer_aspd",
 	},
 	"arcane_circle": {
-		"name": "ARCANE CIRCLE", "icon": "🔮",
+		"name": "ARCANE CIRCLE", "icon": "🔮", "art": "crystal",
 		"desc": "Crystal drops +55%, the other two branches -20%. Mages start a level ahead.",
 		"branch_bias": {"crystal": 1.55, "wood": 0.8, "bow": 0.8},
 		"seed_upgrade": "mage_aoe",
 	},
 	"veterans_head_start": {
-		"name": "VETERAN'S HEAD START", "icon": "🎖️",
+		"name": "VETERAN'S HEAD START", "icon": "🎖️", "art": "paladin",
 		"desc": "+2 field slots for this run. Gold earned -10%.",
 		"bonus_slots": 2, "gold_mult": 0.9,
 	},
 	"combo_zealot": {
-		"name": "COMBO ZEALOT", "icon": "🔥",
+		"name": "COMBO ZEALOT", "icon": "🔥", "art": "fx_merge",
 		"desc": "Merge combo window +60%, combo bonus grows faster. Base luck -1%.",
 		"combo_window_mult": 1.6, "combo_step_mult": 1.75, "base_rare_delta": -0.01,
 	},
 	"pitys_friend": {
-		"name": "PITY'S FRIEND", "icon": "🍀",
+		"name": "PITY'S FRIEND", "icon": "🍀", "art": "emerald",
 		"desc": "The pity counter kicks in sooner and hits harder. Fortress max HP -10.",
 		"pity_threshold_delta": -3, "pity_boost_mult": 1.4, "fortress_hp_delta": -10.0,
 	},
 	# Only offered to a run that has already beaten the game once -- the one
 	# card here that is not for a first run at all.
 	"golems_blessing": {
-		"name": "GOLEM'S BLESSING", "icon": "🗿",
+		"name": "GOLEM'S BLESSING", "icon": "🗿", "art": "stone_golem",
 		"desc": "Fortress starts at +25% max HP, fully healed. Defender damage -10%.",
 		"fortress_hp_mult": 1.25, "defender_damage_mult": 0.9,
 		"requires": "dragon_bonus",
 	},
 }
+
+const UIStyle = preload("res://scripts/ui/UIStyle.gd")
+
+# What a blessing looks like on the choice plate. The colour is borrowed from
+# the upgrade category the blessing leans on, so a card that hands warriors a
+# level is the same red as the warrior upgrades it is buying into.
+const TINTS := {
+	"woodland_oath": "warrior",
+	"rangers_pact": "archer",
+	"arcane_circle": "mage",
+	"veterans_head_start": "fortress",
+	"combo_zealot": "general",
+	"pitys_friend": "archer",
+	"golems_blessing": "fortress",
+}
+
+func get_art_path(id: String) -> String:
+	var art: String = String(DEFS.get(id, {}).get("art", ""))
+	return "res://art/%s.png" % art if art != "" else ""
+
+func accent(id: String) -> Color:
+	return UIStyle.category_color(String(TINTS.get(id, "general")))
 
 var active_id: String = ""
 

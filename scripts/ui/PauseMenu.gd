@@ -42,8 +42,15 @@ const ICON_SIZE := 64.0
 const ICON_X := 34.0
 
 # Player-facing options. Main reads screen_fx_enabled before playing a flash.
-var sound_enabled: bool = true
-var screen_fx_enabled: bool = true
+#
+# Both live on MetaManager rather than here: this node dies with the run, and a
+# setting the player has to turn off again every time they start one is not a
+# setting. These two properties are the view of them, so every existing reader
+# is untouched.
+var sound_enabled: bool:
+	get: return MetaManager.sound_enabled
+var screen_fx_enabled: bool:
+	get: return MetaManager.screen_fx_enabled
 
 var _menu_page: Control
 var _settings_page: Control
@@ -210,18 +217,12 @@ func _show_settings() -> void:
 # ---------------------------------------------------------------- settings
 
 func _toggle_sound() -> void:
-	sound_enabled = not sound_enabled
-	_apply_sound()
+	MetaManager.set_sound_enabled(not sound_enabled)
 	_refresh_setting_labels()
 
 func _toggle_screen_fx() -> void:
-	screen_fx_enabled = not screen_fx_enabled
+	MetaManager.set_screen_fx_enabled(not screen_fx_enabled)
 	_refresh_setting_labels()
-
-func _apply_sound() -> void:
-	var bus: int = AudioServer.get_bus_index("Master")
-	if bus >= 0:
-		AudioServer.set_bus_mute(bus, not sound_enabled)
 
 func _refresh_setting_labels() -> void:
 	_sound_btn.text = "SOUND  %s" % _on_off(sound_enabled)

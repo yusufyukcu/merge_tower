@@ -74,6 +74,16 @@ const WINTER_MOOD := {
 	"night": 0.00, "sky": Color(0.82, 0.88, 1.00), "rim": Color(0.95, 0.97, 1.00)
 }
 
+# And where the second one does, past the dragon. Same rule as winter -- a
+# palette change rather than another sundown -- but pulled the other way: the
+# ember map lights itself from the ground, so the air over it is warm and the
+# edge a body catches is the fire it is standing next to rather than the sun.
+# `night` sits a little above zero so the map's own glows stay worth having,
+# which on a field lit by lava is the whole of what the player sees.
+const LAVA_MOOD := {
+	"night": 0.28, "sky": Color(1.00, 0.82, 0.68), "rim": Color(1.00, 0.66, 0.34)
+}
+
 # Long enough that the player sees the light change rather than finding it
 # changed, short enough to be over before the first enemy of the wave arrives.
 const MOOD_FADE := 2.4
@@ -373,10 +383,11 @@ var _graded: Array[ShaderMaterial] = []
 var _vignette: ShaderMaterial = null
 var _cur: Dictionary = {}
 var _tween: Tween = null
-# Set the moment winter lands. Night no longer climbs high enough on its own
-# to mark that the changeover happened, so this is what set_wave checks to
-# know the daylight table is done owning the sky.
-var _winter: bool = false
+# Set the moment the first changeover lands, and left set through every one
+# after it. Night no longer climbs high enough on its own to mark that a
+# changeover happened, so this is what set_wave checks to know the daylight
+# table is done owning the sky.
+var _phase_locked: bool = false
 
 func _init() -> void:
 	# The light has to keep moving through the upgrade screen: the changeover at
@@ -420,18 +431,27 @@ func attach_vignette(parent: Control, rect: Rect2) -> void:
 # Called on every wave. The hour it lands on is a curve rather than a step, so
 # most waves move the light a little and no wave announces that it did.
 func set_wave(wave: int) -> void:
-	# Past the changeover the winter mood owns the sky, and a wave counter that
-	# kept walking the daylight table would start dragging it back toward dusk.
-	if _winter:
+	# Past a changeover the phase's own mood owns the sky, and a wave counter
+	# that kept walking the daylight table would start dragging it back to dusk.
+	if _phase_locked:
 		return
 	_go(_mood_for_wave(wave), MOOD_FADE)
 
 func to_winter(secs: float) -> void:
-	_winter = true
+	_to_phase(WINTER_MOOD, secs)
+
+func to_lava(secs: float) -> void:
+	_to_phase(LAVA_MOOD, secs)
+
+# Both changeovers do the same thing to the light -- take the sky off the
+# daylight table for good and walk it to a fixed mood -- so they are one call
+# with the mood as its only argument.
+func _to_phase(mood: Dictionary, secs: float) -> void:
+	_phase_locked = true
 	_go({
-		"night": float(WINTER_MOOD["night"]),
-		"sky": WINTER_MOOD["sky"] as Color,
-		"rim": WINTER_MOOD["rim"] as Color,
+		"night": float(mood["night"]),
+		"sky": mood["sky"] as Color,
+		"rim": mood["rim"] as Color,
 	}, secs)
 
 func _mood_for_wave(wave: int) -> Dictionary:

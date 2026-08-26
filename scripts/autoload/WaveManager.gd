@@ -77,7 +77,55 @@ const WINTER_BOSS := "ice_dragon"
 const WINTER_MIDBOSS := "frost_troll"
 
 func is_winter(wave: int) -> bool:
-	return wave > WINTER_WAVE
+	return wave > WINTER_WAVE and not is_lava(wave)
+
+# --------------------------------------------------------------------- embers
+#
+# The second changeover, and the same shape as the first: the dragon falls on
+# wave 50 and the snow goes out from under it (see Main._play_lava_change).
+# Everything after that is fought on the ember map.
+#
+# The dragon's wave is already in BOSS_SCHEDULE, so this names the wave rather
+# than scheduling anything of its own -- the map turns on the beat that wave is
+# cleared, which is the beat the dragon is dead.
+const LAVA_WAVE := 50
+
+func is_lava(wave: int) -> bool:
+	return wave > LAVA_WAVE
+
+# Which of the three the field is standing on for a given wave. One place for
+# the answer, because the map, the light, the roster and -- once a run can be
+# walked away from -- the menu the player comes back to all want it.
+const BIOME_FOREST := "forest"
+const BIOME_ICE := "ice"
+const BIOME_LAVA := "lava"
+
+func biome_for(wave: int) -> String:
+	if is_lava(wave):
+		return BIOME_LAVA
+	if wave > WINTER_WAVE:
+		return BIOME_ICE
+	return BIOME_FOREST
+
+# The ember roster, written out in full the same way winter's was and for the
+# same reason: ids the database has never heard of are filtered out rather than
+# spawned as nothing, so the fire creatures can be added one at a time. Until
+# the first of them exists this comes back empty and the winter roster keeps
+# marching -- which is a frozen army walking a burning map, but a run that
+# keeps playing beats a run that spawns nothing.
+const LAVA_IMP_WAVE := 51
+const LAVA_HOUND_WAVE := 55
+const LAVA_BRUTE_WAVE := 60
+
+func _lava_pool(wave: int) -> Array:
+	var ids: Array = []
+	if wave >= LAVA_IMP_WAVE:
+		ids.append("ember_imp")
+	if wave >= LAVA_HOUND_WAVE:
+		ids.append("magma_hound")
+	if wave >= LAVA_BRUTE_WAVE:
+		ids.append("obsidian_brute")
+	return ids
 
 # The winter roster comes in a body at a time rather than all three landing on
 # the same wave the map turns to snow -- the wolf is the first cold thing the
@@ -104,10 +152,21 @@ func _built(ids: Array) -> Array:
 			out.append(id)
 	return out
 
+# The boss the ember phase is meant to build toward. Named here rather than put
+# in BOSS_SCHEDULE because it does not own one wave: it is whichever multiple of
+# thirty falls past the dragon, for as long as the player keeps going.
+const LAVA_BOSS := "molten_titan"
+
 func _boss_for(wave: int) -> String:
 	var named: Array = _built([String(BOSS_SCHEDULE.get(wave, ""))])
 	if not named.is_empty():
 		return named[0]
+	if is_lava(wave):
+		# Its own boss once there is one, and the dragon again until then --
+		# past fifty there is nothing else left that has ever been a boss.
+		var lava: Array = _built([LAVA_BOSS, WINTER_BOSS, WINTER_MIDBOSS])
+		if not lava.is_empty():
+			return lava[0]
 	if is_winter(wave):
 		# Past the two scheduled winter bosses, the multiples of thirty
 		# alternate rather than repeating the dragon forever -- the boss
@@ -119,7 +178,15 @@ func _boss_for(wave: int) -> String:
 	return "stone_golem"
 
 func _pool_for(wave: int) -> Array:
-	if is_winter(wave):
+	# The ember roster first, then the frozen one under it, then the green one
+	# under both. Each falls through to the next when nothing in it is built
+	# yet, so an unfinished phase borrows the last finished one's creatures
+	# rather than spawning an empty wave.
+	if is_lava(wave):
+		var lava: Array = _built(_lava_pool(wave))
+		if not lava.is_empty():
+			return lava
+	if wave > WINTER_WAVE:
 		var winter: Array = _built(_winter_pool(wave))
 		if not winter.is_empty():
 			return winter
